@@ -1,0 +1,14 @@
+{
+  "type": "module",
+  "dependencies": {
+    "express": "^5.1.0",
+    "mic": "^2.1.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "scripts": {
+    "start": "nodemon server.js"
+  }
+}
