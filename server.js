@@ -9,25 +9,20 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server);
 
 const PORT = 3000;
-
-// Serve static files
 app.use(express.static('./public'));
 
-// Mic setup
-let micInstance = null;
-let micInputStream = null;
-
-const THRESHOLD_MULTIPLIER = 5;
+// --- Pulse detection config ---
+const THRESHOLD_MULTIPLIER = 8;
 const WINDOW_SIZE = 1024;
 const DEBOUNCE_MS = 50;
 
+let micInstance = null;
+let micInputStream = null;
 let recentAmps = [];
 let lastSpikeTime = 0;
 
-const startMic = () => {
-  if (micInstance) return;
-
-  micInstance = mic({
+function createMic() {
+  return mic({
     rate: '48000',
     channels: '1',
     debug: false,
@@ -35,63 +30,73 @@ const startMic = () => {
     bitwidth: 32,
     endian: 'little',
   });
+}
 
+function startMic() {
+  if (micInstance) return;
+  micInstance = createMic();
   micInputStream = micInstance.getAudioStream();
+
+  micInputStream.on('error', (err) => console.error('Mic stream error:', err));
 
   micInputStream.on('data', (data) => {
     const now = Date.now();
-
-    for (let i = 0; i < data.length; i += 4) {
+    for (let i = 0; i + 4 <= data.length; i += 4) {
       const sample = data.readInt32LE(i);
       const absSample = Math.abs(sample);
 
       recentAmps.push(absSample);
       if (recentAmps.length > WINDOW_SIZE) recentAmps.shift();
 
-      const avgAmp = recentAmps.reduce((a, b) => a + b, 0) / recentAmps.length;
+      if (recentAmps.length < 8) continue; // wait until we have some history
 
-      if (absSample > avgAmp * THRESHOLD_MULTIPLIER && now - lastSpikeTime > DEBOUNCE_MS) {
-        io.emit('pulse');
+      // use RMS to be a bit more robust
+      const rms = Math.sqrt(recentAmps.reduce((s, v) => s + v * v, 0) / recentAmps.length);
+
+      // minimum absolute floor to avoid tiny-rms issues
+      const floor = 15000;
+      const threshold = Math.max(rms * THRESHOLD_MULTIPLIER, floor);
+
+      if (absSample > threshold && now - lastSpikeTime > DEBOUNCE_MS) {
         lastSpikeTime = now;
-        break;
+        io.emit('pulse');
+        break; // proceed to next incoming chunk
       }
     }
   });
 
   micInstance.start();
-  console.log('Mic started...');
-};
+  console.log('Mic started');
+}
 
-const stopMic = () => {
+function stopMic() {
   if (!micInstance) return;
-
-  micInstance.stop();
+  try {
+    micInstance.stop();
+  } catch (e) { /* ignore */ }
   micInstance = null;
   micInputStream = null;
   recentAmps = [];
   lastSpikeTime = 0;
-  console.log('Mic stopped...');
-};
+  console.log('Mic stopped');
+}
 
-
-//change
-// Socket.IO
+// --- Socket.IO ---
 io.on('connection', (socket) => {
-  console.log('Client connected');
+  console.log('Client connected', socket.id);
+  // on connect tell client current state
   socket.emit('state', !!micInstance);
 
-  stopMic();
   socket.on('toggle', (state) => {
     if (state) startMic();
     else stopMic();
+    io.emit('state', !!micInstance); // broadcast new state
   });
 
-  socket.on('disconnect', () => console.log('Client disconnected'));
+  socket.on('disconnect', () => console.log('Client disconnected', socket.id));
 });
 
-// Start server
+// --- Start server ---
 if (!server.listening) {
-  server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-  });
+  server.listen(PORT, () => console.log(`Server listening: http://localhost:${PORT}`));
 }

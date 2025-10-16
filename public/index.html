@@ -1,25 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Geiger Monitor</title>
-  <link rel="icon" href="favicon.ico">
-</head>
-<body>
-    
-  <button id="toggleButton">OFF</button>
-  <div id="pulseIndicator"></div>
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="pulse.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geiger Controlled Synth</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="icon" type="image/png" href="favicon.ico" />
+  </head>
+  <body>
+    <!-- p5.js handles all visuals inside the canvas -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="sketch.js"></script>
+  </body>
 </html>
-<style>
-  body { font-family: sans-serif; text-align: center; padding: 50px; }
-  #pulse { margin-top: 20px; font-size: 1.2em; color: black; }
-  button { padding: 10px 20px; font-size: 1em; margin: 5px; }
-  #pulseIndicator {
-    width: 50px; height: 50px; margin: 20px auto;
-    border-radius: 50%; background: grey;
-    transition: background 0.1s;
-  }
-</style>
