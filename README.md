@@ -40,7 +40,8 @@ cd Geiger-Controlled-Synth
 npm install
 ./start_server.sh
 ```
-##Roadmap
+
+## Roadmap
 - Improve Synth Engine
   - Add polyphony so multiple pulses can overlap instead of cutting each other off.
   - Introduce different oscillator types (sine, saw, triangle, noise).
