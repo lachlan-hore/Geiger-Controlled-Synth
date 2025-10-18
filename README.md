@@ -28,7 +28,7 @@ This version introduces an expressive synthesis engine, envelope shaping, and wa
 
 ---
 
-## Features (v0.3)
+## Features (v0.1.3)
 
 ### 🧠 **Audio Engine**
 - Supports **sine**, **square**, **sawtooth**, **triangle**, and **random** waveforms.
