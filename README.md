@@ -1,55 +1,64 @@
 # Geiger-Controlled-Synth
 
-Turn Geiger counter pulses (via audio input) into sound synthesis with the Web Audio API.
+Turn Geiger counter pulses (via audio input) into sound synthesis and interactive visualizations.
 
 ---
 
-## How it Works
-- **Server (Node.js)**
-  - Listens to audio input with [`mic`](https://www.npmjs.com/package/mic).
-  - Detects spikes above a noise threshold.
-  - Emits `pulse` events to connected clients via [Socket.IO](https://socket.io/).
+## Overview
 
-- **Client (Browser)**
-  - Connects to server and listens for `pulse` events.
-  - Plays a short synthesized sound on each pulse.
-  - Flashes a circle indicator for visual feedback.
-  - Toggle button to start/stop monitoring.
+**Geiger-Controlled-Synth** transforms real-time radiation detection into a dynamic audio-visual performance tool.  
+Each pulse detected from the Geiger counter triggers a sound with a customizable **attack–sustain–decay** envelope, while the visuals respond with color, brightness, and pulse overlap — creating a living, reactive display of invisible energy.
+
+This version introduces an expressive synthesis engine, envelope shaping, and waveform-based visual feedback.
 
 ---
 
-## Features (v0.1)
-- Real-time pulse detection with configurable threshold, window size, and debounce.
-- Simple oscillator “blip” sound triggered by pulses.
-- Visual pulse indicator in browser.
-- Auto server restart with [Nodemon](https://www.npmjs.com/package/nodemon).
+## System Architecture
+
+### **Server (Node.js)**
+- Uses [`mic`](https://www.npmjs.com/package/mic) to listen to the audio input.
+- Detects pulses above a noise threshold and debounces false positives.
+- Sends real-time `pulse` events to all connected clients via [Socket.IO](https://socket.io/).
+
+### **Client (Browser)**
+- Receives `pulse` events from the server.
+- Generates sound using the Web Audio API with envelope shaping and multiple oscillator types.
+- Displays a central **pulsing visual** that responds to the audio envelope.
+- Provides real-time waveform selection and envelope editing via UI controls.
 
 ---
 
-## Setup
+## Features (v0.3)
+
+### 🧠 **Audio Engine**
+- Supports **sine**, **square**, **sawtooth**, **triangle**, and **random** waveforms.
+- Each pulse triggers a short synth note using a per-pulse envelope.
+- **Overlapping pulses** blend together naturally instead of cutting off.
+- **Exponential envelope curves** for smoother and more musical amplitude transitions.
+- Waveform color feedback — random mode picks a new waveform color each trigger.
+
+### 🎨 **Visual Feedback**
+- Expanding, glowing circle synced to the envelope’s amplitude.
+- Colors correspond to waveform type (e.g., sine = cyan, saw = orange, etc.).
+
+### 🧩 **UI Controls**
+- Waveform selector dropdown with live visual color feedback.
+- Interactive **Attack–Sustain–Decay (ASD)** envelope editor.
+- On-screen toggle to start or stop pulse listening.
+- Small pulse indicator showing recent activity.
+
+---
+
+## Installation
 
 ### Requirements
 - Node.js v20+
-- Nodemon (optional, for auto-restart)
-- Audio line-in from Geiger counter or pulse source
+- Audio line-in from Geiger counter or pulse generator
+- (Optional) [Nodemon](https://www.npmjs.com/package/nodemon) for auto-restarts
 
-### Install & Run
+### Setup
 ```bash
 git clone https://github.com/lachlan-hore/Geiger-Controlled-Synth.git
 cd Geiger-Controlled-Synth
 npm install
 ./start_server.sh
-```
-
-## Roadmap
-- Improve Synth Engine
-  - Add polyphony so multiple pulses can overlap instead of cutting each other off.
-  - Introduce different oscillator types (sine, saw, triangle, noise).
-  - Map the Geiger pulse rate (counts per second) to envelope controls (attack/decay) for more dynamic sounds.
-  - Use long gaps between pulses to trigger chord changes or shifts in pitch/harmony.
-  - Add effects like delay, reverb, and filters.
-- UI Enhancements
-  - Sliders and toggles for synth parameters (pitch, envelope, waveform, effects).
-  - Visual rate meter showing counts per second.
-  - Toggle to enable/disable automatic chord changes.
-  - Graph of recent pulse activity.
