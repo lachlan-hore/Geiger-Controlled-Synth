@@ -20,6 +20,7 @@ let micInstance = null;
 let micInputStream = null;
 let recentAmps = [];
 let lastSpikeTime = 0;
+let clientCount = 0;
 
 function createMic() {
   return mic({
@@ -82,18 +83,29 @@ function stopMic() {
 }
 
 // --- Socket.IO ---
-io.on('connection', (socket) => {
-  console.log('Client connected', socket.id);
-  // on connect tell client current state
-  socket.emit('state', !!micInstance);
+io.on("connection", (socket) => {
+  clientCount++;
+  console.log("Client connected", socket.id, "Total:", clientCount);
 
-  socket.on('toggle', (state) => {
+  // Send current state to new client
+  socket.emit("state", !!micInstance);
+
+  socket.on("toggle", (state) => {
     if (state) startMic();
     else stopMic();
-    io.emit('state', !!micInstance); // broadcast new state
+    io.emit("state", !!micInstance);
   });
 
-  socket.on('disconnect', () => console.log('Client disconnected', socket.id));
+  socket.on("disconnect", () => {
+    clientCount--;
+    console.log("Client disconnected", socket.id, "Remaining:", clientCount);
+
+    // If all clients are gone, stop the mic
+    if (clientCount <= 0) {
+      stopMic();
+      io.emit("state", false);
+    }
+  });
 });
 
 // --- Start server ---

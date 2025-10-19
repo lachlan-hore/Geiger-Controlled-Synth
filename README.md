@@ -9,7 +9,7 @@ Turn Geiger counter pulses (via audio input) into sound synthesis and interactiv
 **Geiger-Controlled-Synth** transforms real-time radiation detection into a dynamic audio-visual performance tool.  
 Each pulse detected from the Geiger counter triggers a sound with a customizable **attack–sustain–decay** envelope, while the visuals respond with color, brightness, and pulse overlap — creating a living, reactive display of invisible energy.
 
-This version introduces an expressive synthesis engine, envelope shaping, and waveform-based visual feedback.
+This version (v0.1.4) enhances expressiveness with more vivid waveform colors, improved random waveform behavior, and optimized visual rendering for smoother performance.
 
 ---
 
@@ -28,25 +28,19 @@ This version introduces an expressive synthesis engine, envelope shaping, and wa
 
 ---
 
-## Features (v0.1.3)
-
-### 🧠 **Audio Engine**
-- Supports **sine**, **square**, **sawtooth**, **triangle**, and **random** waveforms.
-- Each pulse triggers a short synth note using a per-pulse envelope.
-- **Overlapping pulses** blend together naturally instead of cutting off.
-- **Exponential envelope curves** for smoother and more musical amplitude transitions.
-- Waveform color feedback — random mode picks a new waveform color each trigger.
-
-### 🎨 **Visual Feedback**
-- Expanding, glowing circle synced to the envelope’s amplitude.
+## New Features (v0.1.4)
+### **Visual Feedback**
+- Expanding glowing circle with gradient-based shading.
 - Colors correspond to waveform type (e.g., sine = cyan, saw = orange, etc.).
+- On random mode, the color reflects the waveform selected for that specific pulse.
+- Larger and smoother circle rendering for a more fluid and immersive effect.
 
-### 🧩 **UI Controls**
+### **UI Controls**
 - Waveform selector dropdown with live visual color feedback.
-- Interactive **Attack–Sustain–Decay (ASD)** envelope editor.
-- On-screen toggle to start or stop pulse listening.
-- Small pulse indicator showing recent activity.
+- Small pulse indicator showing recent activity bursts.
 
+### **Bug Fix**
+- Fixed browser refresh breaking running state of program by turning off mic on client disconnetion
 ---
 
 ## Installation
