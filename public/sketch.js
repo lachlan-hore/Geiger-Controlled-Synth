@@ -9,13 +9,19 @@ let audioCtx, masterGain, analyser, dataArray, bufferLength;
 let waveType = "random", waveformColor = "#999999", lastRandomColor = "#999999";
 let activeEnvelopes = [];
 
+// Master output & CPM tracking
+let masterSlider;
+let pulseHistory = [];
+let cpm = 0;
+let outputAmplitude = 0;
+
 // Envelope defaults
 let attack = 0.1, sustainTime = 0.1, sustainLevel = 0.5, decay = 0.7;
 let envLevel = 0;
 
 // Envelope UI
 let envPoints = [], draggingPoint = null;
-let envBox = { x: 40, y: 150, w: 220, h: 80 };
+let envBox = { x: 40, y: 175, w: 220, h: 80 };
 
 // Waveform options
 let waveSelector;
@@ -60,22 +66,39 @@ function setup() {
     triggerPulse();
   });
 
-  // Waveform selector
-  waveSelector = createSelect();
-  for (let w of waveOptions) waveSelector.option(w);
-  waveSelector.selected(waveType);
-  waveSelector.position(40, 80);
-  waveSelector.style("font-size", "14px");
-  waveSelector.style("background", "#222");
-  waveSelector.style("color", "#999");
-  waveSelector.style("border", "none");
-  waveSelector.style("padding", "4px 8px");
-  waveSelector.changed(() => {
-    waveType = waveSelector.value();
-    updateWaveColor();
-  });
+  // --- Waveform toggle buttons ---
+  const waveChoices = ["sine", "square", "sawtooth", "triangle"];
+  let buttonX = 40, buttonY = 90, buttonW = 80, buttonH = 32, spacing = 12;
+  waveButtons = {};
+  activeWaves = { sine: true, square: false, sawtooth: false, triangle: false };
+
+  for (let w of waveChoices) {
+    const btn = createButton(w);
+    btn.position(buttonX, buttonY);
+    btn.size(buttonW, buttonH);
+    btn.style("background", "#222");
+    btn.style("color", activeWaves[w] ? "#fff" : "#999");
+    btn.style("border", "none");
+    btn.style("border-radius", "6px");
+    btn.style("font-size", "14px");
+    btn.style("cursor", "pointer");
+
+    btn.mousePressed(() => {
+      activeWaves[w] = !activeWaves[w];
+      updateWaveButtonStyles();
+    });
+
+    waveButtons[w] = btn;
+    buttonX += buttonW + spacing;
+  }
+
+  updateWaveButtonStyles();
 
   updateWaveColor();
+
+  // --- Master Output Vertical Slider ---
+  const sliderHeight = 220;
+  masterSlider = new VerticalSlider(width - 60, height - 60, sliderHeight, 0, 1, 0.7, "OUT");
 }
 
 // ============================================================
@@ -83,16 +106,16 @@ function setup() {
 // ============================================================
 function applyInitialEnvelopeValues() {
   const { x, y, w, h } = envBox;
-  const totalTime = Math.max(0.0001, attack + sustainTime + decay);
   const yBottom = y + h;
 
   envPoints = [
     { label: "A", x: x, y: yBottom },
-    { label: "Peak", x: x + (attack / totalTime) * w, y: y },
-    { label: "S", x: x + ((attack + sustainTime) / totalTime) * w, y: y + h * (1 - sustainLevel) },
-    { label: "D", x: x + w * 0.98, y: yBottom },
+    { label: "Peak", x: x + w * 0.25, y: y },
+    { label: "S", x: x + w * 0.6, y: y + h * 0.4 },
+    { label: "D", x: x + w, y: yBottom },
   ];
 }
+
 
 // ============================================================
 // Draw Loop
@@ -101,17 +124,59 @@ function draw() {
   background(15);
   updateEnvelopeLevel();
   if (analyser && dataArray) analyser.getByteTimeDomainData(dataArray);
-
+  
+  drawPulseTimeline();
   drawCircularWaveform();
-  drawSmallPulseIndicator(width - 80, 30);
-  drawToggleButton(75, 10);
+  drawToggleButton(80, 10);
   drawEnvelopeGraph();
 
-  textAlign(LEFT);
+  updateCPM();
+
+  // --- Master Output Slider ---
+  masterSlider.update();
+  masterSlider.draw(outputAmplitude);
+  if (masterGain) masterGain.gain.value = masterSlider.value;
+
+  // --- Text Labels with Bounding Boxes ---
+  drawLabelBox(10, 10, "Input:");
+  drawLabelBox(envBox.x - 10, envBox.y - 45, "Envelope");
+  drawLabelBox(30, 55, "Waveform");
+  drawLabelBox(width - 100, 17, "    Pulse");
+  drawLabelBox(width - 100, 50, "     CPM");
+
+  drawSmallPulseIndicator(width - 85, 30);
+  // CPM numeric value
+  textAlign(RIGHT);
   fill(180);
-  text("Input:", 30, 30);
-  text("Envelope", envBox.x - 10, envBox.y - 30);
-  text("Waveform", 30, 70);
+  text(`${cpm}`, width - 70, 64);
+}
+
+
+
+// ============================================================
+// CPM Update
+// ============================================================
+function updateCPM() {
+  const millisNow = millis();
+  const oneMinuteAgo = millisNow - 60000;
+  pulseHistory = pulseHistory.filter(p => p.time > oneMinuteAgo);
+  cpm = pulseHistory.length;
+}
+
+function updateWaveButtonStyles() {
+  const colorMap = {
+    sine: "#01c0ff",
+    square: "#fe0606",
+    sawtooth: "#fc9300",
+    triangle: "#00ff55"
+  };
+  for (const w in waveButtons) {
+    const btn = waveButtons[w];
+    if (!btn) continue;
+    const active = activeWaves[w];
+    btn.style("background", active ? colorMap[w] : "#222");
+    btn.style("color", active ? "#fff" : "#999");
+  }
 }
 
 // ============================================================
@@ -225,12 +290,34 @@ function drawCircularWaveform() {
 // Pulse Indicator
 // ============================================================
 function drawSmallPulseIndicator(x, y) {
-  const active = millis() - pulseTime < (attack + sustainTime + decay) * 10;
-  fill(active ? "#33ff99" : "#555");
+  // Active if a pulse occurred in the last 150 ms
+  const recentPulse = pulseHistory[pulseHistory.length - 1];
+  const active = recentPulse && millis() - recentPulse.time < 150;
+
+  fill(active ? "#33ff99" : "#444");
+  noStroke();
   ellipse(x, y, 20);
-  fill(180);
-  textAlign(LEFT);
-  text("Pulse", x + 20, y);
+}
+
+function drawPulseTimeline() {
+  const now = millis();
+  const oneMinute = 60000;
+  const startX = width;
+  const endX = 0;
+  const baseY = height;
+
+  for (const p of pulseHistory) {
+    const age = now - p.time;
+    if (age > oneMinute) continue;
+
+    const x = map(age, 0, oneMinute, startX, endX);
+    const alpha = map(age, 0, oneMinute, 255, 0);
+    const c = color(p.color);
+
+    stroke(red(c), green(c), blue(c), alpha);
+    strokeWeight(2.5);
+    line(x, 0, x, baseY);
+  }
 }
 
 // ============================================================
@@ -243,6 +330,7 @@ function drawEnvelopeGraph() {
   strokeWeight(5);
   rect(x - 10, y - 10, w + 20, h + 20, 6);
 
+  // Draw envelope curve
   stroke(255);
   strokeWeight(1);
   noFill();
@@ -250,18 +338,25 @@ function drawEnvelopeGraph() {
   for (const p of envPoints) vertex(p.x, p.y);
   endShape();
 
+  // Draw points
   noStroke();
   for (const p of envPoints) {
     fill(hovering(p) || draggingPoint === p ? "#33ff99" : "#888");
     ellipse(p.x, p.y, 10);
   }
 
-  const totalW = envPoints[3].x - envPoints[0].x || w;
-  attack = round(map(envPoints[1].x - envPoints[0].x, 0, totalW, 0.01, 4.0), 2);
-  sustainTime = round(map(envPoints[2].x - envPoints[1].x, 0, totalW, 0.01, 4.0), 2);
-  decay = round(map(envPoints[3].x - envPoints[2].x, 0, totalW, 0.01, 4.0), 2);
+  // --- Segment-based calculation (prevents decay from affecting others) ---
+  const aSeg = envPoints[1].x - envPoints[0].x; // A duration
+  const sSeg = envPoints[2].x - envPoints[1].x; // S duration
+  const dSeg = envPoints[3].x - envPoints[2].x; // D duration
+  const totalW = envBox.w; // Use fixed reference for scaling to seconds
+
+  attack = round(map(aSeg, 0, totalW, 0.01, 4.0), 2);
+  sustainTime = round(map(sSeg, 0, totalW, 0.01, 4.0), 2);
+  decay = round(map(dSeg, 0, totalW, 0.01, 4.0), 2);
   sustainLevel = round(1 - constrain((envPoints[2].y - y) / h, 0, 1), 2);
 
+  // Draw parameter boxes
   const boxW = 70, boxH = 36, boxY = y + h + 20, spacing = 10;
   const boxes = [
     { label: "A", value: `${attack.toFixed(2)}s` },
@@ -303,6 +398,8 @@ function updateEnvelopeLevel() {
     totalLevel += level;
   }
   envLevel = constrain(1 - Math.exp(-totalLevel * 0.8), 0, 1);
+
+  outputAmplitude = envLevel;
 }
 
 // ============================================================
@@ -317,18 +414,36 @@ function mousePressed() {
     return;
   }
   for (const p of envPoints) if (hovering(p)) draggingPoint = p;
+
+  masterSlider.pressed();
 }
 function mouseDragged() {
   if (draggingPoint) {
-    draggingPoint.x = constrain(mouseX, envBox.x, envBox.x + envBox.w);
+    const i = envPoints.indexOf(draggingPoint);
+    const minX = i > 0 ? envPoints[i - 1].x + 5 : envBox.x;
+    const maxX = i < envPoints.length - 1 ? envPoints[i + 1].x - 5 : envBox.x + envBox.w;
+
+    draggingPoint.x = constrain(mouseX, minX, maxX);
     draggingPoint.y = constrain(mouseY, envBox.y, envBox.y + envBox.h);
+
+    // Keep baseline/top points fixed vertically
+    if (draggingPoint.label === "A" || draggingPoint.label === "D") {
+      draggingPoint.y = envBox.y + envBox.h;
+    } else if (draggingPoint.label === "Peak") {
+      draggingPoint.y = envBox.y;
+    }
   }
+  masterSlider.update();
 }
-function mouseReleased() { draggingPoint = null; }
+function mouseReleased() {
+  draggingPoint = null;
+  masterSlider.released();
+}
 
 function drawToggleButton(x, y) {
   const w = 80, h = 40;
   const hover = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+  strokeWeight(0);
   fill(running ? (hover ? "#33ff99" : "#00cc66") : (hover ? "#ff6666" : "#cc3333"));
   rect(x, y, w, h, 8);
   fill(0);
@@ -345,25 +460,36 @@ function triggerPulse() {
   const now = audioCtx.currentTime;
   const millisNow = millis();
 
+  // --- Determine waveform type (random from active) ---
+  const activeList = Object.keys(activeWaves).filter(k => activeWaves[k]);
+  let type = activeList.length > 0 ? random(activeList) : "sine";
+
+  const colorMap = {
+    sine: "#01c0ff",
+    square: "#fe0606",
+    sawtooth: "#fc9300",
+    triangle: "#00ff55",
+  };
+  lastRandomColor = colorMap[type];
+
+  const pulseColor = (type === "random" && lastRandomColor)
+    ? lastRandomColor
+    : colorMap[type] || "#999999";
+
+  // --- Store pulse info ---
+  pulseHistory.push({ time: millisNow, color: pulseColor });
+  const oneMinuteAgo = millisNow - 60000;
+  pulseHistory = pulseHistory.filter(p => p.time > oneMinuteAgo);
+  cpm = pulseHistory.length;
+
   activeEnvelopes.push({
     startTime: millisNow,
     endTime: millisNow + (attack + sustainTime + decay) * 1000,
   });
 
-  let type = waveSelector ? waveSelector.value() : waveType;
-  const types = ["sine", "square", "sawtooth", "triangle"];
-  if (type === "random") {
-    type = random(types);
-    const colorMap = {
-      sine: "#01c0ff",
-      square: "#fe0606",
-      sawtooth: "#fc9300",
-      triangle: "#00ff55",
-    };
-    lastRandomColor = colorMap[type];
-  }
   updateWaveColor();
 
+  // --- Audio oscillator setup ---
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
@@ -382,10 +508,27 @@ function triggerPulse() {
 // ============================================================
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  if (waveSelector) waveSelector.position(40, 80);
+  
+  // Reposition waveform buttons
+if (waveButtons) {
+  let buttonX = 40, buttonY = 90, buttonW = 80, spacing = 12;
+  for (const w of ["sine", "square", "sawtooth", "triangle"]) {
+    if (waveButtons[w]) {
+      waveButtons[w].position(buttonX, buttonY);
+      buttonX += buttonW + spacing;
+    }
+  }
+}
+   // Update slider
+  if (masterSlider) {
+    const sliderHeight = min(220, height * 0.3); // scale a bit with window size
+    masterSlider.x = width - 60;
+    masterSlider.y = height - 60;
+    masterSlider.h = sliderHeight;
+  }
 }
 function updateWaveColor() {
-  const val = waveSelector ? waveSelector.value() : waveType;
+  const val = waveType;
   const colors = {
     sine: "#01c0ff",
     square: "#fe0606",
@@ -394,5 +537,78 @@ function updateWaveColor() {
     random: "#999999",
   };
   waveformColor = colors[val] || "#999999";
-  if (waveSelector?.style) waveSelector.style("color", waveformColor);
+}
+
+function drawLabelBox(x, y, textStr, align = LEFT) {
+  textSize(16);
+  const paddingX = 12, paddingY = 6;
+  const textW = textWidth(textStr);
+  const boxW = textW + paddingX * 2;
+  const boxH = 28;
+
+  // --- Calculate box position based on alignment ---
+  let xBox = x, yBox = y;
+  if (align === CENTER) xBox -= boxW / 2;
+  else if (align === RIGHT) xBox -= boxW;
+
+  // --- Draw box ---
+  fill(25, 180);
+  stroke(80);
+  strokeWeight(1.5);
+  rect(xBox, yBox, boxW, boxH, 6);
+
+  // --- Draw text centered inside box ---
+  noStroke();
+  fill(200);
+  textAlign(CENTER, CENTER);
+  text(textStr, xBox + boxW / 2, yBox + boxH / 2);
+}
+
+// ============================================================
+// VerticalSlider Class
+// ============================================================
+class VerticalSlider {
+  constructor(x, y, h, min, max, value, label) {
+    this.x = x;
+    this.y = y;
+    this.h = h;
+    this.w = 18;
+    this.min = min;
+    this.max = max;
+    this.value = value;
+    this.label = label;
+    this.active = false;
+    this.smoothAmp = 0;
+  }
+
+  draw(currentAmp) {
+    this.smoothAmp = lerp(this.smoothAmp, currentAmp, 0.15);
+    const bottom = this.y, top = this.y - this.h;
+    const valY = map(this.value, this.min, this.max, bottom, top, true);
+    const ampY = map(this.smoothAmp, this.min, this.max, bottom, top, true);
+
+    noStroke(); fill(40); rect(this.x, top, this.w, this.h, 5);
+    fill(80); rect(this.x, ampY, this.w, bottom - ampY, 5);
+    fill(25, 180); rect(this.x, top, this.w, valY - top, 5);
+    stroke(180); strokeWeight(2); line(this.x, valY, this.x + this.w, valY);
+    if (this.active) { stroke("#33ff99"); strokeWeight(3); line(this.x, valY, this.x + this.w, valY); }
+
+    noStroke(); fill(200); textAlign(CENTER, CENTER); textSize(14);
+    text(this.label, this.x + this.w / 2, bottom + 20);
+  }
+
+  update() {
+    if (this.active) {
+      const newVal = map(mouseY, this.y, this.y - this.h, this.min, this.max, true);
+      this.value = constrain(newVal, this.min, this.max);
+    }
+  }
+
+  pressed() {
+    const withinX = mouseX > this.x && mouseX < this.x + this.w;
+    const withinY = mouseY < this.y && mouseY > this.y - this.h;
+    if (withinX && withinY) this.active = true;
+  }
+
+  released() { this.active = false; }
 }
