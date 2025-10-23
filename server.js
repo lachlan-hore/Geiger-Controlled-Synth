@@ -79,7 +79,7 @@ function startMic() {
   });
 
   micInstance.start();
-  console.log('🎙️  Mic started');
+  console.log('Mic started');
 }
 
 function stopMic() {
@@ -91,7 +91,7 @@ function stopMic() {
   micInputStream = null;
   baseline = 0;
   lastPulseTime = 0;
-  console.log('🛑 Mic stopped');
+  console.log('Mic stopped');
 }
 
 // -------------------------------
@@ -123,5 +123,5 @@ io.on('connection', (socket) => {
 // START SERVER
 // -------------------------------
 server.listen(PORT, () => {
-  console.log(`🚀 Server listening: http://localhost:${PORT}`);
+  console.log(`Server listening: http://localhost:${PORT}`);
 });

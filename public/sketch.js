@@ -1,12 +1,6 @@
-// ============================================================
-// Geiger-Controlled Synth Visual + Audio Interface
-// (Circular waveform redesign v6 — feathered ring, smooth motion)
-// ============================================================
-
 let socket, running = false;
 let pulseTime = 0;
 let audioCtx, masterGain, analyser, dataArray, bufferLength;
-let waveType = "random", waveformColor = "#999999", lastRandomColor = "#999999";
 let activeEnvelopes = [];
 
 // Master output & CPM tracking
@@ -21,11 +15,25 @@ let envLevel = 0;
 
 // Envelope UI
 let envPoints = [], draggingPoint = null;
-let envBox = { x: 40, y: 175, w: 220, h: 80 };
+let envBox = { x: 40, y: 180, w: 220, h: 80 };
 
 // Waveform options
 let waveSelector;
 const waveOptions = ["random", "sine", "square", "sawtooth", "triangle"];
+let lastWaveType = "sine";
+
+// Pitch selection
+const SEMITONES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+let enabledNotes = new Array(12).fill(true);
+
+let enabledOctaves = new Array(10).fill(false);
+for (let i = 1; i <= 5; i++) enabledOctaves[i] = true;
+
+let noteFlashTimers = new Array(12).fill(0);
+let octaveFlashTimers = new Array(10).fill(0);
+const BASE_FREQ = 440; // A4 reference
+
+let pitchModuleX, pitchModuleY;
 
 // Smoothing buffer
 let smoothAmps = [];
@@ -49,9 +57,7 @@ function unlockAudioOnce() {
 }
 document.addEventListener("click", unlockAudioOnce);
 
-// ============================================================
 // Setup
-// ============================================================
 function setup() {
   createCanvas(windowWidth, windowHeight);
   noFill();
@@ -70,7 +76,7 @@ function setup() {
   const waveChoices = ["sine", "square", "sawtooth", "triangle"];
   let buttonX = 40, buttonY = 90, buttonW = 80, buttonH = 32, spacing = 12;
   waveButtons = {};
-  activeWaves = { sine: true, square: false, sawtooth: false, triangle: false };
+  activeWaves = { sine: true, square: true, sawtooth: false, triangle: false };
 
   for (let w of waveChoices) {
     const btn = createButton(w);
@@ -88,22 +94,23 @@ function setup() {
       updateWaveButtonStyles();
     });
 
+    btn.mouseOver(() => btn.style("filter", "brightness(1.3)"));
+    btn.mouseOut(() => btn.style("filter", "brightness(1)"));
+
     waveButtons[w] = btn;
     buttonX += buttonW + spacing;
   }
 
   updateWaveButtonStyles();
 
-  updateWaveColor();
-
+  pitchModuleX = 120;
+  pitchModuleY = height - 130;
   // --- Master Output Vertical Slider ---
   const sliderHeight = 220;
-  masterSlider = new VerticalSlider(width - 60, height - 60, sliderHeight, 0, 1, 0.7, "OUT");
+  masterSlider = new VerticalSlider(width - 60, height - 50, sliderHeight, 0, 1, 0.7, "OUT");
 }
 
-// ============================================================
 // Envelope Setup
-// ============================================================
 function applyInitialEnvelopeValues() {
   const { x, y, w, h } = envBox;
   const yBottom = y + h;
@@ -116,10 +123,7 @@ function applyInitialEnvelopeValues() {
   ];
 }
 
-
-// ============================================================
 // Draw Loop
-// ============================================================
 function draw() {
   background(15);
   updateEnvelopeLevel();
@@ -129,6 +133,7 @@ function draw() {
   drawCircularWaveform();
   drawToggleButton(80, 10);
   drawEnvelopeGraph();
+  drawPitchModule();
 
   updateCPM();
 
@@ -143,6 +148,7 @@ function draw() {
   drawLabelBox(30, 55, "Waveform");
   drawLabelBox(width - 100, 17, "    Pulse");
   drawLabelBox(width - 100, 50, "     CPM");
+  drawLabelBox(30, height - 245, "Pitch Control");
 
   drawSmallPulseIndicator(width - 85, 30);
   // CPM numeric value
@@ -152,10 +158,7 @@ function draw() {
 }
 
 
-
-// ============================================================
 // CPM Update
-// ============================================================
 function updateCPM() {
   const millisNow = millis();
   const oneMinuteAgo = millisNow - 60000;
@@ -179,16 +182,13 @@ function updateWaveButtonStyles() {
   }
 }
 
-// ============================================================
-// Circular Waveform Visualization (v10 - symmetric fade gradient)
-// ============================================================
 function drawCircularWaveform() {
   push();
   translate(width / 2, height / 2);
 
   const baseR = min(width, height) * 0.25;
 
-  // --- Compute average intensity from audio data ---
+  // --- Compute average intensity ---
   let avg = 0;
   if (dataArray && dataArray.length) {
     for (let i = 0; i < dataArray.length; i++) avg += Math.abs(dataArray[i] - 128);
@@ -210,23 +210,24 @@ function drawCircularWaveform() {
     random: "#999999",
   };
   const mainColor = color(
-    waveType === "random" && lastRandomColor ? lastRandomColor : colorMap[waveType] || "#999999"
+    lastWaveType === "random" && lastRandomColor ? lastRandomColor : colorMap[lastWaveType] || "#999999"
   );
   const blended = lerpColor(color("#222"), mainColor, pow(smoothIntensity, 0.7));
 
-  // --- Central dark gradient (black in middle) ---
+  // Transparent feathered center — visible waveform behind it
   drawingContext.save();
-  const innerGrad = drawingContext.createRadialGradient(0, 0, 0, 0, 0, ringR * 1.1);
-  innerGrad.addColorStop(0, "rgba(0,0,0,1)");
-  innerGrad.addColorStop(0.6, "rgba(0,0,0,0.8)");
-  innerGrad.addColorStop(1, blended.toString());
+  const innerGrad = drawingContext.createRadialGradient(0, 0, 0, 0, 0, ringR * 1.4);
+  innerGrad.addColorStop(0, "rgba(0,0,0,0.8)");   // darkest in center
+  innerGrad.addColorStop(0.3, "rgba(0,0,0,0.6)");
+  innerGrad.addColorStop(0.6, "rgba(0,0,0,0.3)");
+  innerGrad.addColorStop(1, "rgba(0,0,0,0)");     // fades out fully
   drawingContext.fillStyle = innerGrad;
   drawingContext.beginPath();
-  drawingContext.arc(0, 0, ringR * 1.1, 0, TWO_PI);
+  drawingContext.arc(0, 0, ringR * 1.4, 0, TWO_PI);
   drawingContext.fill();
   drawingContext.restore();
 
-  // --- Soft symmetric halo around main ring ---
+  // --- Soft symmetric halo (outer glow) ---
   drawingContext.save();
   const haloGrad = drawingContext.createRadialGradient(0, 0, ringR * 0.6, 0, 0, ringR * 1.8);
   haloGrad.addColorStop(0, "rgba(0,0,0,0)");
@@ -250,19 +251,11 @@ function drawCircularWaveform() {
 
   for (let n = 0; n < ringCount; n++) {
     const rBase = minR + n * step;
-
-    // Symmetric fade from main ring
     const distFromRing = abs(rBase - ringR);
     const fade = constrain(map(distFromRing, 0, ringR * 1.2, 1, 0), 0, 1);
     const opacity = pow(fade, 2.0);
-
     const weight = map(n, 0, ringCount - 1, 2, 6);
-    const col = color(
-      red(blended),
-      green(blended),
-      blue(blended),
-      255 * opacity
-    );
+    const col = color(red(blended), green(blended), blue(blended), 255 * opacity);
 
     stroke(col);
     strokeWeight(weight);
@@ -275,8 +268,6 @@ function drawCircularWaveform() {
       const amp = (sample - 128) / 128.0;
       const smoothed = lerp(smoothAmps[i % len] || 0, amp, 0.25);
       smoothAmps[i % len] = smoothed;
-
-      // All waves move outward (no inversion)
       const r = rBase + abs(smoothed) * 200 * smoothIntensity;
       vertex(r * cos(angle), r * sin(angle));
     }
@@ -286,9 +277,7 @@ function drawCircularWaveform() {
   pop();
 }
 
-// ============================================================
 // Pulse Indicator
-// ============================================================
 function drawSmallPulseIndicator(x, y) {
   // Active if a pulse occurred in the last 150 ms
   const recentPulse = pulseHistory[pulseHistory.length - 1];
@@ -320,49 +309,61 @@ function drawPulseTimeline() {
   }
 }
 
-// ============================================================
 // Envelope Graph
-// ============================================================
 function drawEnvelopeGraph() {
   const { x, y, w, h } = envBox;
-  fill(50, 50);
+
+  // Background panels
+  fill(100, 50);
+  noStroke();
+  rect(x - 20, y - 50, w + 40, h + 115, 10);
+
+  fill(0, 70);
   stroke(80);
-  strokeWeight(5);
+  strokeWeight(2);
   rect(x - 10, y - 10, w + 20, h + 20, 6);
 
-  // Draw envelope curve
-  stroke(255);
+  // --- Semi-transparent grid ---
+  stroke(80, 80);
   strokeWeight(1);
+  for (let gx = x; gx <= x + w; gx += w / 10) line(gx, y, gx, y + h);
+  for (let gy = y; gy <= y + h; gy += h / 10) line(x, gy, x + w, gy);
+
+  // --- Envelope curve ---
+  stroke(255);
+  strokeWeight(1.5);
   noFill();
   beginShape();
   for (const p of envPoints) vertex(p.x, p.y);
   endShape();
 
-  // Draw points
+  // --- Envelope points ---
   noStroke();
   for (const p of envPoints) {
     fill(hovering(p) || draggingPoint === p ? "#33ff99" : "#888");
     ellipse(p.x, p.y, 10);
   }
 
-  // --- Segment-based calculation (prevents decay from affecting others) ---
-  const aSeg = envPoints[1].x - envPoints[0].x; // A duration
-  const sSeg = envPoints[2].x - envPoints[1].x; // S duration
-  const dSeg = envPoints[3].x - envPoints[2].x; // D duration
-  const totalW = envBox.w; // Use fixed reference for scaling to seconds
+  // --- Segment durations ---
+  const aSeg = envPoints[1].x - envPoints[0].x;
+  const sSeg = envPoints[2].x - envPoints[1].x;
+  const dSeg = envPoints[3].x - envPoints[2].x;
 
-  attack = round(map(aSeg, 0, totalW, 0.01, 4.0), 2);
-  sustainTime = round(map(sSeg, 0, totalW, 0.01, 4.0), 2);
-  decay = round(map(dSeg, 0, totalW, 0.01, 4.0), 2);
+  // Allow closer point spacing (less minimum gap)
+  const totalW = envBox.w;
+  attack = round(max(0.05, map(aSeg, 0, totalW, 0.05, 8.0)), 2);
+  sustainTime = round(max(0.05, map(sSeg, 0, totalW, 0.05, 8.0)), 2);
+  decay = round(max(0.05, map(dSeg, 0, totalW, 0.05, 8.0)), 2);
   sustainLevel = round(1 - constrain((envPoints[2].y - y) / h, 0, 1), 2);
 
-  // Draw parameter boxes
+  // --- Parameter boxes ---
   const boxW = 70, boxH = 36, boxY = y + h + 20, spacing = 10;
   const boxes = [
-    { label: "A", value: `${attack.toFixed(2)}s` },
-    { label: "S", value: `${sustainTime.toFixed(2)}s` },
-    { label: "D", value: `${decay.toFixed(2)}s` },
+    { label: "A", value: `${attack.toFixed(3)}s` },
+    { label: "S", value: `${sustainTime.toFixed(3)}s` },
+    { label: "D", value: `${decay.toFixed(3)}s` },
   ];
+
   textAlign(CENTER, CENTER);
   textSize(14);
   boxes.forEach((b, i) => {
@@ -402,19 +403,147 @@ function updateEnvelopeLevel() {
   outputAmplitude = envLevel;
 }
 
-// ============================================================
+// PITCH MODULE
+function drawPitchModule() {
+  push();
+  translate(pitchModuleX, pitchModuleY);
+  const outerR = 80, innerR = 50;
+  const segAngle = TWO_PI / 12;
+  const relX = mouseX - pitchModuleX;
+  const relY = mouseY - pitchModuleY;
+  const mouseR = dist(0, 0, relX, relY);
+  const mouseA = (atan2(relY, relX) + TWO_PI) % TWO_PI;
+
+  const colorMap = {
+    sine: "#01c0ff",
+    square: "#fe0606",
+    sawtooth: "#fc9300",
+    triangle: "#00ff55",
+    random: "#999999",
+  };
+  //bounding box
+  fill(100, 50);
+  strokeWeight(0);
+  rect(-100, -120, 240, 235, 10);
+
+  let hovered = -1;
+  for (let i = 0; i < 12; i++) {
+    const a1 = -HALF_PI + segAngle * i - 0.0001;
+    const a2 = a1 + segAngle;
+    const mid = (a1 + a2) / 2;
+    const active = enabledNotes[i];
+    const flashed = millis() - noteFlashTimers[i] < 180;
+
+    // Normalize angles to 0..TWO_PI range
+    const norm = (a) => (a + TWO_PI) % TWO_PI;
+    const mA = norm(mouseA);
+    const n1 = norm(a1);
+    const n2 = norm(a2);
+
+    let inArc = false;
+    if (n1 < n2) inArc = mA >= n1 && mA < n2;
+    else inArc = mA >= n1 || mA < n2; // wraparound segment case
+
+    if (mouseR >= innerR && mouseR <= outerR && inArc) hovered = i;
+
+    let c = "#222";
+    if (flashed) {
+      c = colorMap[lastWaveType];
+    } else if (hovered === i && active) {
+      c = lerpColor(color("#555"), color(colorMap[lastWaveType]), 0.6).toString();
+    } else if (hovered === i) {
+      c = "#444";
+    } else if (active) {
+      c = "#555";
+    }
+
+    fill(c);
+    noStroke();
+    beginShape();
+    for (let a = a1; a <= a2; a += 0.02) vertex(cos(a) * outerR, sin(a) * outerR);
+    for (let a = a2; a >= a1; a -= 0.02) vertex(cos(a) * innerR, sin(a) * innerR);
+    endShape(CLOSE);
+
+    fill(200);
+    textAlign(CENTER, CENTER);
+    text(SEMITONES[i], cos(mid) * 65, sin(mid) * 65);
+  }
+
+  // --- Octave buttons ---
+  const startX = outerR + 30;
+  const startY = -((enabledOctaves.length - 1) * 22) / 2;
+  const w = 36, h = 18;
+
+  for (let o = 9; o >= 0; o--) {
+    const y = startY + (9 - o) * 22;
+    const x = startX;
+    const active = enabledOctaves[o];
+    const flashed = millis() - octaveFlashTimers[o] < 180;
+    const hover = mouseX > pitchModuleX + x - w / 2 &&
+                  mouseX < pitchModuleX + x + w / 2 &&
+                  mouseY > pitchModuleY + y - h / 2 &&
+                  mouseY < pitchModuleY + y + h / 2;
+
+    let c = active ? "#666" : "#222";
+    if (flashed) c = colorMap[lastWaveType];
+    else if (hover) c = "#444";
+
+    fill(c);
+    rect(x - w / 2, y - h / 2, w, h, 6);
+    fill("#ddd");
+    text(o, x, y + 1);
+  }
+  pop();
+}
+
 // Interaction
-// ============================================================
 function hovering(p) { return dist(mouseX, mouseY, p.x, p.y) < 10; }
 function mousePressed() {
+  // --- Note clicks ---
+  const relX = mouseX - pitchModuleX;
+  const relY = mouseY - pitchModuleY;
+  const r = dist(0, 0, relX, relY);
+  const a = (atan2(relY, relX) + TWO_PI) % TWO_PI;
+  const innerR = 50;
+  const outerR = 80;
+  const segAngle = TWO_PI / 12;
+
+  for (let i = 0; i < 12; i++) {
+    const a1 = (-HALF_PI + segAngle * i + TWO_PI) % TWO_PI;
+    const a2 = (a1 + segAngle) % TWO_PI;
+
+    let inArc = false;
+    if (a1 < a2) inArc = a >= a1 && a < a2;
+    else inArc = a >= a1 || a < a2; // handle wrap-around at 0 radians
+
+    if (inArc && r >= innerR && r <= outerR) {
+      enabledNotes[i] = !enabledNotes[i];
+      return;
+    }
+  }
+
+  // --- Octave clicks ---
+  const startX = pitchModuleX + outerR + 30;
+  const startY = pitchModuleY - ((enabledOctaves.length - 1) * 22) / 2;
+  const w = 36, h = 18;
+  for (let o = 9; o >= 0; o--) {
+    const y = startY + (9 - o) * 22;
+    if (mouseX > startX - w / 2 && mouseX < startX + w / 2 &&
+        mouseY > y - h / 2 && mouseY < y + h / 2) {
+      enabledOctaves[o] = !enabledOctaves[o];
+      return;
+    }
+  }
+
+  // --- Input toggle ---
   const btn = { x: 100, y: 10, w: 80, h: 40 };
   if (mouseX > btn.x && mouseX < btn.x + btn.w && mouseY > btn.y && mouseY < btn.y + btn.h) {
     running = !running;
     socket.emit("toggle", running);
     return;
   }
-  for (const p of envPoints) if (hovering(p)) draggingPoint = p;
 
+  for (const p of envPoints) if (hovering(p)) draggingPoint = p;
   masterSlider.pressed();
 }
 function mouseDragged() {
@@ -452,18 +581,15 @@ function drawToggleButton(x, y) {
   text(running ? "ON" : "OFF", x + w / 2, y + h / 2);
 }
 
-// ============================================================
 // Sound Logic
-// ============================================================
 function triggerPulse() {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
   const millisNow = millis();
 
-  // --- Determine waveform type (random from active) ---
   const activeList = Object.keys(activeWaves).filter(k => activeWaves[k]);
   let type = activeList.length > 0 ? random(activeList) : "sine";
-
+  lastWaveType = type;
   const colorMap = {
     sine: "#01c0ff",
     square: "#fe0606",
@@ -471,29 +597,35 @@ function triggerPulse() {
     triangle: "#00ff55",
   };
   lastRandomColor = colorMap[type];
-
-  const pulseColor = (type === "random" && lastRandomColor)
-    ? lastRandomColor
-    : colorMap[type] || "#999999";
-
-  // --- Store pulse info ---
+  lastWaveType = type;
+  const pulseColor = colorMap[type] || "#999999";
   pulseHistory.push({ time: millisNow, color: pulseColor });
-  const oneMinuteAgo = millisNow - 60000;
-  pulseHistory = pulseHistory.filter(p => p.time > oneMinuteAgo);
-  cpm = pulseHistory.length;
+  pulseHistory = pulseHistory.filter(p => millisNow - p.time < 60000);
 
   activeEnvelopes.push({
     startTime: millisNow,
     endTime: millisNow + (attack + sustainTime + decay) * 1000,
   });
 
-  updateWaveColor();
+  // --- Pick random enabled pitch ---
+  const availNotes = SEMITONES.map((n, i) => (enabledNotes[i] ? i : null)).filter(v => v !== null);
+  const availOcts = enabledOctaves.map((v, i) => (v ? i : null)).filter(v => v !== null);
+  if (availNotes.length === 0 || availOcts.length === 0) return;
 
-  // --- Audio oscillator setup ---
+  const noteIdx = random(availNotes);
+  const oct = random(availOcts);
+  const midi = 12 * (oct + 1) + noteIdx;
+  const freq = BASE_FREQ * Math.pow(2, (midi - 69) / 12);
+
+  // Flash the correct note/octave button
+  noteFlashTimers[noteIdx] = millis();
+  octaveFlashTimers[oct] = millis();
+
+  // --- Audio ---
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
-  osc.frequency.setValueAtTime(random(200, 800), now);
+  osc.frequency.setValueAtTime(freq, now);
   gain.gain.setValueAtTime(0.0001, now);
   gain.gain.linearRampToValueAtTime(0.5 * sustainLevel, now + attack);
   gain.gain.setValueAtTime(0.5 * sustainLevel, now + attack + sustainTime);
@@ -503,40 +635,31 @@ function triggerPulse() {
   osc.stop(now + attack + sustainTime + decay + 0.1);
 }
 
-// ============================================================
 // Resize & Color
-// ============================================================
 function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
+  const minW = 500;  // prevent overlap on width
+  const minH = 600;  // prevent overlap on height
+  resizeCanvas(max(windowWidth, minW), max(windowHeight, minH));
   
   // Reposition waveform buttons
-if (waveButtons) {
-  let buttonX = 40, buttonY = 90, buttonW = 80, spacing = 12;
-  for (const w of ["sine", "square", "sawtooth", "triangle"]) {
-    if (waveButtons[w]) {
-      waveButtons[w].position(buttonX, buttonY);
-      buttonX += buttonW + spacing;
+  if (waveButtons) {
+    let buttonX = 40, buttonY = 90, buttonW = 80, spacing = 12;
+    for (const w of ["sine", "square", "sawtooth", "triangle"]) {
+      if (waveButtons[w]) {
+        waveButtons[w].position(buttonX, buttonY);
+        buttonX += buttonW + spacing;
+      }
     }
   }
-}
    // Update slider
   if (masterSlider) {
     const sliderHeight = min(220, height * 0.3); // scale a bit with window size
     masterSlider.x = width - 60;
-    masterSlider.y = height - 60;
+    masterSlider.y = height - 50;
     masterSlider.h = sliderHeight;
   }
-}
-function updateWaveColor() {
-  const val = waveType;
-  const colors = {
-    sine: "#01c0ff",
-    square: "#fe0606",
-    sawtooth: "#fc9300",
-    triangle: "#00ff55",
-    random: "#999999",
-  };
-  waveformColor = colors[val] || "#999999";
+  pitchModuleX = 120;
+  pitchModuleY = height - 130;
 }
 
 function drawLabelBox(x, y, textStr, align = LEFT) {
@@ -552,21 +675,18 @@ function drawLabelBox(x, y, textStr, align = LEFT) {
   else if (align === RIGHT) xBox -= boxW;
 
   // --- Draw box ---
+  noStroke();
   fill(25, 180);
-  stroke(80);
-  strokeWeight(1.5);
   rect(xBox, yBox, boxW, boxH, 6);
 
   // --- Draw text centered inside box ---
-  noStroke();
+  
   fill(200);
   textAlign(CENTER, CENTER);
   text(textStr, xBox + boxW / 2, yBox + boxH / 2);
 }
 
-// ============================================================
 // VerticalSlider Class
-// ============================================================
 class VerticalSlider {
   constructor(x, y, h, min, max, value, label) {
     this.x = x;
@@ -587,7 +707,10 @@ class VerticalSlider {
     const valY = map(this.value, this.min, this.max, bottom, top, true);
     const ampY = map(this.smoothAmp, this.min, this.max, bottom, top, true);
 
-    noStroke(); fill(40); rect(this.x, top, this.w, this.h, 5);
+    noStroke();fill(100, 50);
+    rect(this.x - this.w, top - 10, this.w + 40, this.h + 45, 10);
+
+    fill(40); rect(this.x, top, this.w, this.h, 5);
     fill(80); rect(this.x, ampY, this.w, bottom - ampY, 5);
     fill(25, 180); rect(this.x, top, this.w, valY - top, 5);
     stroke(180); strokeWeight(2); line(this.x, valY, this.x + this.w, valY);
