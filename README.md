@@ -47,6 +47,28 @@ npm install
 
 ## Changelog:
 
+### (v0.1.6):
+#### **Refinements & Structural Improvements**
+- Internal codebase reorganized for cleaner rendering and consistent UI scaling.
+- Further smoothed halo and waveform gradients for high-refresh displays.
+- Improved layout responsiveness for small and large screens.
+- Better synchronization between visual and audio envelopes.
+- Minor code cleanup and naming consistency.
+
+#### Visual Enhancements
+- More stable timeline rendering (lines for each pulse) across refreshes.
+- Slightly softer glow effect around the main waveform ring.
+- Visual responsiveness tuned for high-frequency pulses.
+
+#### Performance
+- Reduced CPU usage during idle states.
+- Better handling of simultaneous envelope overlaps.
+
+#### Bug Fixes
+- Fixed occasional waveform freeze when resizing window.
+- Resolved rare pulse overlap miscoloration.
+
+
 ### (v0.1.5):
 #### **UI Controls**
 - Waveform selector replaced with buttons for each wavetype
