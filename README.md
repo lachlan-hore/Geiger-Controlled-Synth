@@ -9,10 +9,7 @@ Turn Geiger counter pulses (via audio input) into sound synthesis and interactiv
 **Geiger-Controlled-Synth** transforms real-time radiation detection into a dynamic audio-visual performance tool.  
 Each pulse detected from the Geiger counter triggers a sound, while the visuals respond with color and brightness, creating an interactive display of invisible energy.
 
-<<<<<<< HEAD
-=======
 
->>>>>>> 2027b3382f39f3729a5b1add84be566257bf56ff
 ---
 
 ## System Architecture
@@ -26,11 +23,8 @@ Each pulse detected from the Geiger counter triggers a sound, while the visuals 
 - Receives `pulse` events from the server.
 - Generates sound using the Web Audio API with envelope shaping and multiple oscillator types.
 - Displays a central **pulsing visual** that responds to the audio envelope.
-<<<<<<< HEAD
 - Provides real-time waveform selection, pitch and envelope editing via UI controls.
-=======
 - Provides real-time waveform selection and manipulation via UI controls.
->>>>>>> 2027b3382f39f3729a5b1add84be566257bf56ff
 
 ---
 
@@ -52,27 +46,6 @@ npm install
 **Then open** [http://localhost:3000/](http://localhost:3000/)
 
 ## Changelog:
-
-### (v0.1.6):
-#### **Refinements & Structural Improvements**
-- Internal codebase reorganized for cleaner rendering and consistent UI scaling.
-- Further smoothed halo and waveform gradients for high-refresh displays.
-- Improved layout responsiveness for small and large screens.
-- Better synchronization between visual and audio envelopes.
-- Minor code cleanup and naming consistency.
-
-#### Visual Enhancements
-- More stable timeline rendering (lines for each pulse) across refreshes.
-- Slightly softer glow effect around the main waveform ring.
-- Visual responsiveness tuned for high-frequency pulses.
-
-#### Performance
-- Reduced CPU usage during idle states.
-- Better handling of simultaneous envelope overlaps.
-
-#### Bug Fixes
-- Fixed occasional waveform freeze when resizing window.
-- Resolved rare pulse overlap miscoloration.
 
 ### (v0.1.5):
 #### **UI Controls**
