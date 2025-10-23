@@ -7,8 +7,12 @@ Turn Geiger counter pulses (via audio input) into sound synthesis and interactiv
 ## Overview
 
 **Geiger-Controlled-Synth** transforms real-time radiation detection into a dynamic audio-visual performance tool.  
-Each pulse detected from the Geiger counter triggers a sound with a customizable **attack–sustain–decay** envelope, while the visuals respond with color, brightness, and pulse overlap — creating a living, reactive display of invisible energy.
+Each pulse detected from the Geiger counter triggers a sound, while the visuals respond with color and brightness, creating an interactive display of invisible energy.
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 2027b3382f39f3729a5b1add84be566257bf56ff
 ---
 
 ## System Architecture
@@ -22,7 +26,11 @@ Each pulse detected from the Geiger counter triggers a sound with a customizable
 - Receives `pulse` events from the server.
 - Generates sound using the Web Audio API with envelope shaping and multiple oscillator types.
 - Displays a central **pulsing visual** that responds to the audio envelope.
+<<<<<<< HEAD
 - Provides real-time waveform selection, pitch and envelope editing via UI controls.
+=======
+- Provides real-time waveform selection and manipulation via UI controls.
+>>>>>>> 2027b3382f39f3729a5b1add84be566257bf56ff
 
 ---
 
@@ -32,7 +40,7 @@ Each pulse detected from the Geiger counter triggers a sound with a customizable
 ### Requirements
 - Node.js v20+
 - Audio line-in from Geiger counter or pulse generator
-- (Optional) [Nodemon](https://www.npmjs.com/package/nodemon) for auto-restarts
+- [Nodemon](https://www.npmjs.com/package/nodemon) for auto-restarts
 
 ### Setup
 ```bash
