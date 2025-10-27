@@ -15,9 +15,9 @@ app.use(express.static('./public'));
 // -------------------------------
 const SAMPLE_RATE = 44100;       // 44.1kHz is fine for Geiger audio
 const BIT_DEPTH = 16;            // 16-bit is plenty; faster processing
-const DEBOUNCE_MS = 100;         // Minimum time between pulses
-const BASE_FLOOR = 3000;         // Minimum absolute amplitude to be considered
-const SPIKE_MULTIPLIER = 5;      // Must exceed smoothed baseline by this factor
+const DEBOUNCE_MS = 50;         // Minimum time between pulses
+const BASE_FLOOR = 2000;         // Minimum absolute amplitude to be considered
+const SPIKE_MULTIPLIER = 8;      // Must exceed smoothed baseline by this factor
 const BASELINE_DECAY = 0.999;    // Long-term baseline smoothing (0.99–0.999 typical)
 const STARTUP_IGNORE_MS = 1000;  // Ignore first second after starting mic
 
@@ -30,6 +30,8 @@ let baseline = 0;
 let lastPulseTime = 0;
 let startedAt = 0;
 let clientCount = 0;
+let pulseActive = false;
+let pulseCooldownUntil = 0;
 
 // -------------------------------
 // MIC SETUP
@@ -58,19 +60,25 @@ function startMic() {
 
   micInputStream.on('data', (data) => {
     const now = Date.now();
-    if (now - startedAt < STARTUP_IGNORE_MS) return; // ignore startup noise
+    if (now - startedAt < STARTUP_IGNORE_MS) return;
 
-    // Process 16-bit samples
     for (let i = 0; i + 2 <= data.length; i += 2) {
       const sample = Math.abs(data.readInt16LE(i));
 
-      // Update baseline using exponential smoothing (ignores sudden spikes)
       baseline = BASELINE_DECAY * baseline + (1 - BASELINE_DECAY) * sample;
-
       const dynamicThreshold = Math.max(BASE_FLOOR, baseline * SPIKE_MULTIPLIER);
 
-      // Trigger pulse if clearly above dynamic threshold
-      if (sample > dynamicThreshold && now - lastPulseTime > DEBOUNCE_MS) {
+      const isAbove = sample > dynamicThreshold;
+
+      // If signal drops below threshold, reset pulseActive after short cooldown
+      if (!isAbove && now > pulseCooldownUntil) {
+        pulseActive = false;
+      }
+
+      // Detect new pulse only on rising edge (not sustained)
+      if (isAbove && !pulseActive && now - lastPulseTime > DEBOUNCE_MS) {
+        pulseActive = true;
+        pulseCooldownUntil = now + 30; // ms after which pulse can reset
         lastPulseTime = now;
         io.emit('pulse');
         break; // one pulse per chunk
