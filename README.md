@@ -47,7 +47,28 @@ npm install
 
 ## Changelog:
 
-### (v0.1.6):
+### This version(v0.1.61)
+#### **Functionality & Behavior Updates**
+- Fixed **Dynamic ENV toggle** not responding correctly due to mismatched click area — now properly toggles when pressed.
+- Prevented **ENV target** from resetting unintentionally when clicking anywhere on the canvas; only updates when the slider is actively moved.
+- Introduced a `wasActive` flag in `VerticalSlider` class for more reliable input detection.
+
+#### **Visual Enhancements**
+- Enhanced **circular waveform animation**: stronger expansion and contraction based on audio amplitude for a more expressive, reactive feel.
+- Adjusted envelope return handling to improve fluidity and user feedback.
+- Cleaned up draw logic for more consistent layering and blending modes.
+
+#### **Internal Improvements**
+- Reorganized event handling for better modularity.
+- Simplified globalCompositeOperation resets to prevent rendering glitches after fades.
+- Reduced redundant redraws to improve frame pacing on high-refresh monitors.
+
+#### **Bug Fixes**
+- Resolved “ENV return value resetting incorrectly” when mouse interactions occurred outside the slider.
+- Fixed Dynamic Dampening button’s bounding box alignment with visual layout.
+- Eliminated residual variable reference errors during slider release handling.
+
+### (v0.1.6) :
 #### **Refinements & Structural Improvements**
 - Internal codebase reorganized for cleaner rendering and consistent UI scaling.
 - Further smoothed halo and waveform gradients for high-refresh displays.

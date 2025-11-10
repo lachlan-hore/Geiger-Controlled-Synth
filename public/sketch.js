@@ -12,10 +12,13 @@ let outputAmplitude = 0;
 // Envelope defaults
 let attack = 0.1, sustainTime = 0.1, sustainLevel = 0.5, decay = 0.7;
 let envLevel = 0;
+let dynamicDampening = true;
+let envTargetValue = 0.05;
 
 // Envelope UI
 let envPoints = [], draggingPoint = null;
 let envBox = { x: 40, y: 180, w: 220, h: 80 };
+let envVolumeSlider;
 
 // Waveform options
 let waveSelector;
@@ -34,6 +37,19 @@ let octaveFlashTimers = new Array(10).fill(0);
 const BASE_FREQ = 440; // A4 reference
 
 let pitchModuleX, pitchModuleY;
+
+// Key & scale selection
+let keySelect, scaleSelect;
+const KEYS = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
+const SCALES = {
+  Major: [0,2,4,5,7,9,11],
+  Minor: [0,2,3,5,7,8,10],
+  Pentatonic: [0,2,4,7,9],
+  Blues: [0,3,5,6,7,10],
+  Chromatic: [0,1,2,3,4,5,6,7,8,9,10,11],
+};
+let currentKey = 0; // C
+let currentScale = "Major";
 
 // Smoothing buffer
 let smoothAmps = [];
@@ -64,6 +80,11 @@ function setup() {
   textAlign(CENTER, CENTER);
   textSize(16);
   applyInitialEnvelopeValues();
+
+  // Prevent undefined arrays before audio unlock
+  bufferLength = 128;
+  dataArray = new Uint8Array(bufferLength);
+  smoothAmps = new Array(bufferLength).fill(0);
 
   socket = io();
   socket.on("state", (state) => (running = state));
@@ -102,12 +123,36 @@ function setup() {
   }
 
   updateWaveButtonStyles();
+  
+  // --- Key and Scale Dropdowns ---
+  keySelect = createSelect();
+  keySelect.position(40, height - 230);
+  KEYS.forEach(k => keySelect.option(k));
+  keySelect.selected(KEYS[currentKey]);
+  styleDropdown(keySelect);
+  keySelect.changed(() => {
+    currentKey = KEYS.indexOf(keySelect.value());
+    updateScale();
+  });
+
+  scaleSelect = createSelect();
+  scaleSelect.position(105, height - 230);
+  Object.keys(SCALES).forEach(s => scaleSelect.option(s));
+  scaleSelect.selected(currentScale);
+  styleDropdown(scaleSelect);
+  scaleSelect.changed(() => {
+    currentScale = scaleSelect.value();
+    updateScale();
+  });
+
+  updateScale();
 
   pitchModuleX = 120;
-  pitchModuleY = height - 130;
+  pitchModuleY = height - 105;
   // --- Master Output Vertical Slider ---
   const sliderHeight = 220;
   masterSlider = new VerticalSlider(width - 60, height - 50, sliderHeight, 0, 1, 0.7, "OUT");
+  envVolumeSlider = new VerticalSlider(width - 120, height - 50, sliderHeight, 0, 0.1, 0.03, "ENV");
 }
 
 // Envelope Setup
@@ -132,6 +177,7 @@ function draw() {
   drawPulseTimeline();
   drawCircularWaveform();
   drawToggleButton(80, 10);
+  drawDampeningButton(190, 10);
   drawEnvelopeGraph();
   drawPitchModule();
 
@@ -141,6 +187,33 @@ function draw() {
   masterSlider.update();
   masterSlider.draw(outputAmplitude);
   if (masterGain) masterGain.gain.value = masterSlider.value;
+  
+  // --- Envelope Volume Slider ---
+  envVolumeSlider.update();
+  if (!envVolumeSlider.active) {
+    envVolumeSlider.value = lerp(envVolumeSlider.value, envTargetValue, 0.08);
+  }
+  envVolumeSlider.draw(0);
+  // --- Envelope target return indicator ---
+  const sliderX = envVolumeSlider.x;
+  const sliderY = envVolumeSlider.y;
+  const sliderH = envVolumeSlider.h;
+  const sliderMin = envVolumeSlider.min;
+  const sliderMax = envVolumeSlider.max;
+
+  // Position of the return target line
+  const tNorm = map(envTargetValue, sliderMin, sliderMax, 0, 1);
+  const targetY = sliderY - tNorm * sliderH;
+
+  // Draw indicator line
+  stroke("#33ff99");
+  strokeWeight(2);
+  line(sliderX, targetY, sliderX + 15, targetY);
+  noStroke();
+  fill("#33ff99");
+  textSize(12);
+  textAlign(CENTER, CENTER);
+  text("↩", sliderX + 10, targetY - 10);
 
   // --- Text Labels with Bounding Boxes ---
   drawLabelBox(10, 10, "Input:");
@@ -148,7 +221,7 @@ function draw() {
   drawLabelBox(30, 55, "Waveform");
   drawLabelBox(width - 100, 17, "    Pulse");
   drawLabelBox(width - 100, 50, "     CPM");
-  drawLabelBox(30, height - 245, "Pitch Control");
+  drawLabelBox(30, height - 265, "Pitch Control");
 
   drawSmallPulseIndicator(width - 85, 30);
   // CPM numeric value
@@ -182,93 +255,94 @@ function updateWaveButtonStyles() {
   }
 }
 
+function updateScale() {
+  enabledNotes.fill(false);
+  const pattern = SCALES[currentScale];
+  pattern.forEach(step => {
+    const note = (currentKey + step) % 12;
+    enabledNotes[note] = true;
+  });
+}
+
 function drawCircularWaveform() {
+  if (!dataArray || !dataArray.length) return;
   push();
   translate(width / 2, height / 2);
 
   const baseR = min(width, height) * 0.25;
 
-  // --- Compute average intensity ---
+  // --- Compute average amplitude intensity ---
   let avg = 0;
-  if (dataArray && dataArray.length) {
-    for (let i = 0; i < dataArray.length; i++) avg += Math.abs(dataArray[i] - 128);
-    avg /= dataArray.length;
-  }
-  const intensity = constrain(avg / 100, 0, 1);
-  const smoothIntensity = lerp(window._prevIntensity || 0, intensity, 0.15);
+  for (let i = 0; i < dataArray.length; i++) avg += Math.abs(dataArray[i] - 128);
+  avg /= dataArray.length;
+  const intensity = constrain(avg / 90, 0, 1.2);
+  const smoothIntensity = lerp(window._prevIntensity || 0, intensity, 0.18);
   window._prevIntensity = smoothIntensity;
 
-  // --- Main ring radius ---
-  const ringR = baseR * (1.0 + smoothIntensity * 2.2);
+  const ringR = baseR * (1.0 + smoothIntensity * 4.5);
 
-  // --- Determine waveform color ---
+  // --- Color blending based on activity ---
   const colorMap = {
     sine: "#01c0ff",
     square: "#fe0606",
     sawtooth: "#fc9300",
     triangle: "#00ff55",
-    random: "#999999",
   };
-  const mainColor = color(
-    lastWaveType === "random" && lastRandomColor ? lastRandomColor : colorMap[lastWaveType] || "#999999"
-  );
-  const blended = lerpColor(color("#222"), mainColor, pow(smoothIntensity, 0.7));
+  const targetColor = color(colorMap[lastWaveType] || "#777");
+  const inactiveColor = color("#666");
+  const fadeMix = constrain(map(smoothIntensity, 0, 0.15, 0, 1), 0, 1);
+  const blended = lerpColor(inactiveColor, targetColor, fadeMix);
 
-  // Transparent feathered center — visible waveform behind it
+  // --- Inner gradient glow ---
   drawingContext.save();
-  const innerGrad = drawingContext.createRadialGradient(0, 0, 0, 0, 0, ringR * 1.4);
-  innerGrad.addColorStop(0, "rgba(0,0,0,0.8)");   // darkest in center
-  innerGrad.addColorStop(0.3, "rgba(0,0,0,0.6)");
-  innerGrad.addColorStop(0.6, "rgba(0,0,0,0.3)");
-  innerGrad.addColorStop(1, "rgba(0,0,0,0)");     // fades out fully
+  const innerGrad = drawingContext.createRadialGradient(0, 0, 0, 0, 0, ringR * 1.2);
+  innerGrad.addColorStop(0, "rgba(0,0,0,0.8)");
+  innerGrad.addColorStop(0.4, "rgba(0,0,0,0.6)");
+  innerGrad.addColorStop(0.8, `rgba(${red(blended)},${green(blended)},${blue(blended)},0.25)`);
+  innerGrad.addColorStop(1, "rgba(0,0,0,0)");
   drawingContext.fillStyle = innerGrad;
   drawingContext.beginPath();
-  drawingContext.arc(0, 0, ringR * 1.4, 0, TWO_PI);
+  drawingContext.arc(0, 0, ringR * 1.2, 0, TWO_PI);
   drawingContext.fill();
   drawingContext.restore();
 
-  // --- Soft symmetric halo (outer glow) ---
+  // --- Outer halo ---
   drawingContext.save();
-  const haloGrad = drawingContext.createRadialGradient(0, 0, ringR * 0.6, 0, 0, ringR * 1.8);
+  const haloGrad = drawingContext.createRadialGradient(0, 0, ringR * 0.7, 0, 0, ringR * 2.0);
   haloGrad.addColorStop(0, "rgba(0,0,0,0)");
-  haloGrad.addColorStop(0.45, blended.toString());
-  haloGrad.addColorStop(0.55, blended.toString());
+  haloGrad.addColorStop(0.5, `rgba(${red(blended)},${green(blended)},${blue(blended)},${120 + 100 * smoothIntensity})`);
   haloGrad.addColorStop(1, "rgba(0,0,0,0)");
   drawingContext.fillStyle = haloGrad;
   drawingContext.beginPath();
-  drawingContext.arc(0, 0, ringR * 1.8, 0, TWO_PI);
+  drawingContext.arc(0, 0, ringR * 2.0, 0, TWO_PI);
   drawingContext.fill();
   drawingContext.restore();
 
-  // --- Multi-ring waveform strokes ---
-  const maxR = dist(0, 0, width / 2, height / 2) * 1.05;
-  const minR = ringR * 0.2;
-  const totalSpan = maxR - minR;
-  const ringCount = 24;
-  const step = totalSpan / ringCount;
+  // --- waveform rings ---
   const len = bufferLength || 128;
-  const angleOffset = frameCount * 0.1;
+  const ringCount = 16;
+  const baseThickness = 3 + 4 * smoothIntensity;
 
   for (let n = 0; n < ringCount; n++) {
-    const rBase = minR + n * step;
-    const distFromRing = abs(rBase - ringR);
-    const fade = constrain(map(distFromRing, 0, ringR * 1.2, 1, 0), 0, 1);
-    const opacity = pow(fade, 2.0);
-    const weight = map(n, 0, ringCount - 1, 2, 6);
-    const col = color(red(blended), green(blended), blue(blended), 255 * opacity);
+    const rBase = ringR * (0.4 + 0.1 * n);
+    const fade = map(n, 0, ringCount - 1, 1, 0);
+    const opacity = 200 * pow(fade, 1.8);
+    const col = color(red(blended), green(blended), blue(blended), opacity);
 
     stroke(col);
-    strokeWeight(weight);
+    strokeWeight(baseThickness * fade);
     noFill();
 
     beginShape();
-    for (let i = 0; i <= len; i++) {
-      const angle = map(i, 0, len, 0, TWO_PI) + angleOffset;
-      const sample = dataArray?.[i % dataArray.length] || 128;
-      const amp = (sample - 128) / 128.0;
-      const smoothed = lerp(smoothAmps[i % len] || 0, amp, 0.25);
-      smoothAmps[i % len] = smoothed;
-      const r = rBase + abs(smoothed) * 200 * smoothIntensity;
+    for (let i = 0; i < len; i++) {
+      // mirror waveform around circle (no seam)
+      const symIndex = i < len / 2 ? i : len - i - 1;
+      const angle = map(i, 0, len, 0, TWO_PI);
+      const sample = dataArray[symIndex] - 128;
+      const amp = sample / 128.0;
+      const smoothed = lerp(smoothAmps[symIndex] || 0, amp, 0.3);
+      smoothAmps[symIndex] = smoothed;
+      const r = rBase + smoothed * (300 + 600 * smoothIntensity);
       vertex(r * cos(angle), r * sin(angle));
     }
     endShape(CLOSE);
@@ -419,12 +493,11 @@ function drawPitchModule() {
     square: "#fe0606",
     sawtooth: "#fc9300",
     triangle: "#00ff55",
-    random: "#999999",
   };
   //bounding box
   fill(100, 50);
   strokeWeight(0);
-  rect(-100, -120, 240, 235, 10);
+  rect(-100, -170, 245, 260, 10);
 
   let hovered = -1;
   for (let i = 0; i < 12; i++) {
@@ -470,12 +543,12 @@ function drawPitchModule() {
   }
 
   // --- Octave buttons ---
-  const startX = outerR + 30;
-  const startY = -((enabledOctaves.length - 1) * 22) / 2;
-  const w = 36, h = 18;
+  const startX = outerR + 35;
+  const startY = -((enabledOctaves.length - 1) * 25) / 2 - 40;
+  const w = 36, h = 20;
 
   for (let o = 9; o >= 0; o--) {
-    const y = startY + (9 - o) * 22;
+    const y = startY + (9 - o) * 25;
     const x = startX;
     const active = enabledOctaves[o];
     const flashed = millis() - octaveFlashTimers[o] < 180;
@@ -523,11 +596,11 @@ function mousePressed() {
   }
 
   // --- Octave clicks ---
-  const startX = pitchModuleX + outerR + 30;
-  const startY = pitchModuleY - ((enabledOctaves.length - 1) * 22) / 2;
-  const w = 36, h = 18;
+  const startX = pitchModuleX + outerR + 35;
+  const startY = pitchModuleY - ((enabledOctaves.length - 1) * 25) / 2 - 40;
+  const w = 36, h = 20;
   for (let o = 9; o >= 0; o--) {
-    const y = startY + (9 - o) * 22;
+    const y = startY + (9 - o) * 25;
     if (mouseX > startX - w / 2 && mouseX < startX + w / 2 &&
         mouseY > y - h / 2 && mouseY < y + h / 2) {
       enabledOctaves[o] = !enabledOctaves[o];
@@ -542,9 +615,21 @@ function mousePressed() {
     socket.emit("toggle", running);
     return;
   }
+  // --- Dynamic dampening toggle ---
+  const labelWidth = textWidth("Dynamic ENV:");
+  const dynBtnX = 190 + labelWidth + 10;
+  const dynBtnY = 10;
+  const dynBtnW = 60, dynBtnH = 32;
+  if (mouseX > dynBtnX && mouseX < dynBtnX + dynBtnW &&
+      mouseY > dynBtnY && mouseY < dynBtnY + dynBtnH) {
+    dynamicDampening = !dynamicDampening;
+    console.log("Dynamic Dampening:", dynamicDampening);
+    return;
+  }
 
   for (const p of envPoints) if (hovering(p)) draggingPoint = p;
   masterSlider.pressed();
+  envVolumeSlider.pressed();
 }
 function mouseDragged() {
   if (draggingPoint) {
@@ -563,10 +648,30 @@ function mouseDragged() {
     }
   }
   masterSlider.update();
+  envVolumeSlider.update();
 }
 function mouseReleased() {
   draggingPoint = null;
   masterSlider.released();
+  envVolumeSlider.released();
+  if (envVolumeSlider.wasActive) {
+    envTargetValue = envVolumeSlider.value;
+  }
+  envVolumeSlider.wasActive = envVolumeSlider.active;
+}
+
+function styleDropdown(sel) {
+  sel.style('background', '#222');
+  sel.style('color', '#ddd');
+  sel.style('border', 'none');
+  sel.style('border-radius', '6px');
+  sel.style('font-size', '14px');
+  sel.style('padding', '6px 10px');
+  sel.style('cursor', 'pointer');
+  sel.style('outline', 'none');
+  sel.style('box-shadow', '0 0 6px rgba(0,0,0,0.4)');
+  sel.mouseOver(() => sel.style('filter', 'brightness(1.2)'));
+  sel.mouseOut(() => sel.style('filter', 'brightness(1)'));
 }
 
 function drawToggleButton(x, y) {
@@ -581,11 +686,47 @@ function drawToggleButton(x, y) {
   text(running ? "ON" : "OFF", x + w / 2, y + h / 2);
 }
 
+function drawDampeningButton(x, y) {
+  const label = "Dynamic ENV:";
+  textAlign(LEFT, CENTER);
+  textSize(14);
+  fill(200);
+  text(label, x, y + 20);
+
+  const btnX = x + textWidth(label) + 10;
+  const w = 60, h = 32;
+  const hover = mouseX > btnX && mouseX < btnX + w && mouseY > y && mouseY < y + h;
+
+  strokeWeight(0);
+  fill(dynamicDampening ? (hover ? "#33ff99" : "#00cc66") : (hover ? "#666" : "#333"));
+  rect(btnX, y, w, h, 8);
+
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text(dynamicDampening ? "ON" : "OFF", btnX + w / 2, y + h / 2);
+}
+
 // Sound Logic
 function triggerPulse() {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
   const millisNow = millis();
+
+  // --- Dynamic dampening logic ---
+  if (dynamicDampening) {
+    if (pulseHistory.length > 0) {
+      const lastPulse = pulseHistory[pulseHistory.length - 1];
+      const delta = millisNow - lastPulse.time;
+
+      // Halve the env every pulse (more aggressive than before)
+      envVolumeSlider.value = max(envVolumeSlider.value * 0.5, 0.002);
+
+      // Recover to target faster (was 0.002, now 0.01)
+      if (delta > 400) {
+        envVolumeSlider.value = lerp(envVolumeSlider.value, envTargetValue, 0.2);
+      }
+    }
+  }
 
   const activeList = Object.keys(activeWaves).filter(k => activeWaves[k]);
   let type = activeList.length > 0 ? random(activeList) : "sine";
@@ -596,7 +737,6 @@ function triggerPulse() {
     sawtooth: "#fc9300",
     triangle: "#00ff55",
   };
-  lastRandomColor = colorMap[type];
   lastWaveType = type;
   const pulseColor = colorMap[type] || "#999999";
   pulseHistory.push({ time: millisNow, color: pulseColor });
@@ -627,8 +767,9 @@ function triggerPulse() {
   osc.type = type;
   osc.frequency.setValueAtTime(freq, now);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.linearRampToValueAtTime(0.5 * sustainLevel, now + attack);
-  gain.gain.setValueAtTime(0.5 * sustainLevel, now + attack + sustainTime);
+  const envVol = envVolumeSlider ? envVolumeSlider.value : 0.5;
+  gain.gain.linearRampToValueAtTime(envVol * sustainLevel, now + attack);
+  gain.gain.setValueAtTime(envVol * sustainLevel, now + attack + sustainTime);
   gain.gain.linearRampToValueAtTime(0.0001, now + attack + sustainTime + decay);
   osc.connect(gain).connect(masterGain);
   osc.start(now);
@@ -638,7 +779,7 @@ function triggerPulse() {
 // Resize & Color
 function windowResized() {
   const minW = 500;  // prevent overlap on width
-  const minH = 600;  // prevent overlap on height
+  const minH = 605;  // prevent overlap on height
   resizeCanvas(max(windowWidth, minW), max(windowHeight, minH));
   
   // Reposition waveform buttons
@@ -653,13 +794,25 @@ function windowResized() {
   }
    // Update slider
   if (masterSlider) {
-    const sliderHeight = min(220, height * 0.3); // scale a bit with window size
+    const sliderHeight = min(220, height * 0.3);
     masterSlider.x = width - 60;
     masterSlider.y = height - 50;
     masterSlider.h = sliderHeight;
   }
+  if (envVolumeSlider) {
+    const sliderHeight = min(220, height * 0.3);
+    envVolumeSlider.x = width - 120;
+    envVolumeSlider.y = height - 50;
+    envVolumeSlider.h = sliderHeight;
+  }
   pitchModuleX = 120;
-  pitchModuleY = height - 130;
+  pitchModuleY = height - 105;
+
+  if (keySelect && scaleSelect) {
+    keySelect.position(40, height - 230);
+    scaleSelect.position(105, height - 230);
+  }
+
 }
 
 function drawLabelBox(x, y, textStr, align = LEFT) {
@@ -733,5 +886,8 @@ class VerticalSlider {
     if (withinX && withinY) this.active = true;
   }
 
-  released() { this.active = false; }
+  released() {
+    this.wasActive = this.active;
+    this.active = false;
+  }
 }
