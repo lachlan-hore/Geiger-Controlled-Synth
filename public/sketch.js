@@ -13,7 +13,7 @@ let outputAmplitude = 0;
 let attack = 0.1, sustainTime = 0.1, sustainLevel = 0.5, decay = 0.7;
 let envLevel = 0;
 let dynamicDampening = true;
-let envTargetValue = 0.05;
+let envTargetValue = 0.03;
 
 // Envelope UI
 let envPoints = [], draggingPoint = null;
@@ -24,6 +24,14 @@ let envVolumeSlider;
 let waveSelector;
 const waveOptions = ["random", "sine", "square", "sawtooth", "triangle"];
 let lastWaveType = "sine";
+
+// Panning variables
+let randomizedPan = true;
+let pulsePanRange = [-1, 1]; // Left (-1) to Right (+1)
+let panOscillate = false;
+let panOscFreq = 1.0; // Hz
+let panOscPhase = 0;
+let draggingPanSlider = false;
 
 // Pitch selection
 const SEMITONES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
@@ -174,10 +182,13 @@ function draw() {
   updateEnvelopeLevel();
   if (analyser && dataArray) analyser.getByteTimeDomainData(dataArray);
   
+
   drawPulseTimeline();
   drawCircularWaveform();
+  drawLogo();
   drawToggleButton(80, 10);
-  drawDampeningButton(190, 10);
+  drawDampeningButton(pitchModuleX + 265, pitchModuleY - 75);
+  drawPanModule(pitchModuleX + 150, pitchModuleY - 20);
   drawEnvelopeGraph();
   drawPitchModule();
 
@@ -194,6 +205,7 @@ function draw() {
     envVolumeSlider.value = lerp(envVolumeSlider.value, envTargetValue, 0.08);
   }
   envVolumeSlider.draw(0);
+
   // --- Envelope target return indicator ---
   const sliderX = envVolumeSlider.x;
   const sliderY = envVolumeSlider.y;
@@ -222,12 +234,25 @@ function draw() {
   drawLabelBox(width - 100, 17, "    Pulse");
   drawLabelBox(width - 100, 50, "     CPM");
   drawLabelBox(30, height - 265, "Pitch Control");
+  
 
   drawSmallPulseIndicator(width - 85, 30);
   // CPM numeric value
   textAlign(RIGHT);
   fill(180);
   text(`${cpm}`, width - 70, 64);
+
+  // update pulse note panning
+  if (panOscillate && pulseHistory.length) {
+    const now = millis();
+    for (let p of pulseHistory) {
+      if (p.panNode) {
+        const panVal = getOscillatedPan(p);
+        p.panNode.pan.value = panVal;
+      }
+    }
+  }
+
 }
 
 
@@ -264,6 +289,66 @@ function updateScale() {
   });
 }
 
+function drawLogo() {
+  push();
+  textAlign(CENTER, CENTER);
+
+  // Center top placement
+  const x = width / 2;
+  const y = 50;
+
+  // Dynamic color blend based on active waves
+  const colorMap = {
+    sine: color("#01c0ff"),
+    square: color("#fe0606"),
+    sawtooth: color("#fc9300"),
+    triangle: color("#00ff55"),
+  };
+  let r = 0, g = 0, b = 0, count = 0;
+  for (let w in activeWaves) {
+    if (activeWaves[w]) {
+      const c = colorMap[w];
+      r += red(c);
+      g += green(c);
+      b += blue(c);
+      count++;
+    }
+  }
+  if (count > 0) { r /= count; g /= count; b /= count; }
+  const blended = color(r, g, b);
+
+  // Smooth pulse tied to envLevel
+  const pulseGlow = map(envLevel, 0, 1, 0.4, 1.6);
+  const baseColor = `rgba(${r},${g},${b},${180 * pulseGlow})`;
+
+  // --- Outer glow ---
+  drawingContext.save();
+  const grad = drawingContext.createRadialGradient(x, y, 0, x, y, 220);
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.3)`);
+  grad.addColorStop(0.6, `rgba(${r},${g},${b},0.15)`);
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  drawingContext.fillStyle = grad;
+  drawingContext.beginPath();
+  drawingContext.arc(x, y, 220, 0, TWO_PI);
+  drawingContext.fill();
+  drawingContext.restore();
+
+  // --- Text styling ---
+  textSize(48);
+  fill(baseColor);
+  stroke(lerpColor(blended, color(255), 0.4));
+  strokeWeight(2);
+  textFont("Orbitron, sans-serif"); // looks futuristic, fallback to sans-serif
+  text("GEIGER", x, y - 12);
+
+  textSize(22);
+  fill(lerpColor(blended, color("#33ff99"), 0.4));
+  noStroke();
+  text("PULSE SYNTH", x, y + 22);
+
+  pop();
+}
+
 function drawCircularWaveform() {
   if (!dataArray || !dataArray.length) return;
   push();
@@ -281,18 +366,28 @@ function drawCircularWaveform() {
 
   const ringR = baseR * (1.0 + smoothIntensity * 4.5);
 
-  // --- Color blending based on activity ---
+  // --- Colour blend based on active waveforms ---
   const colorMap = {
-    sine: "#01c0ff",
-    square: "#fe0606",
-    sawtooth: "#fc9300",
-    triangle: "#00ff55",
+    sine: color("#01c0ff"),
+    square: color("#fe0606"),
+    sawtooth: color("#fc9300"),
+    triangle: color("#00ff55"),
   };
-  const targetColor = color(colorMap[lastWaveType] || "#777");
-  const inactiveColor = color("#666");
-  const fadeMix = constrain(map(smoothIntensity, 0, 0.15, 0, 1), 0, 1);
-  const blended = lerpColor(inactiveColor, targetColor, fadeMix);
 
+  let r = 0, g = 0, b = 0, activeCount = 0;
+  for (let w in activeWaves) {
+    if (activeWaves[w]) {
+      const c = colorMap[w];
+      r += red(c);
+      g += green(c);
+      b += blue(c);
+      activeCount++;
+    }
+  }
+  if (activeCount > 0) {
+    r /= activeCount; g /= activeCount; b /= activeCount;
+  }
+  const blended = color(r, g, b);
   // --- Inner gradient glow ---
   drawingContext.save();
   const innerGrad = drawingContext.createRadialGradient(0, 0, 0, 0, 0, ringR * 1.2);
@@ -362,24 +457,61 @@ function drawSmallPulseIndicator(x, y) {
   ellipse(x, y, 20);
 }
 
+function getOscillatedPan(p) {
+  if (!panOscillate) return p.basePan;
+  const t = (millis() - p.time) / 1000.0;
+  return p.basePan * cos(TWO_PI * panOscFreq * t + p.phaseOffset);
+}
+
+// Returns a randomly selected active wave type (and updates lastWaveType)
+function getActiveWaveType() {
+  const active = Object.keys(activeWaves).filter(k => activeWaves[k]);
+  const type = active.length ? random(active) : "sine";
+  lastWaveType = type;
+  return type;
+}
+
+// Picks a random enabled note+octave and returns a frequency (Hz)
+function getRandomNoteFrequency() {
+  // build list of enabled note indexes
+  const notes = [];
+  for (let i = 0; i < enabledNotes.length; i++) if (enabledNotes[i]) notes.push(i);
+  const octs = [];
+  for (let o = 0; o < enabledOctaves.length; o++) if (enabledOctaves[o]) octs.push(o);
+  if (!notes.length || !octs.length) return BASE_FREQ;
+
+  const noteIdx = random(notes);
+  const oct = random(octs);
+
+  // Convert noteIdx + octave to MIDI note number: choose MIDI A4 = 69 at BASE_FREQ (440)
+  const midi = 12 * (oct + 1) + noteIdx;
+  const freq = BASE_FREQ * Math.pow(2, (midi - 69) / 12);
+  return freq;
+}
+
 function drawPulseTimeline() {
   const now = millis();
   const oneMinute = 60000;
-  const startX = width;
-  const endX = 0;
-  const baseY = height;
 
   for (const p of pulseHistory) {
     const age = now - p.time;
     if (age > oneMinute) continue;
 
-    const x = map(age, 0, oneMinute, startX, endX);
     const alpha = map(age, 0, oneMinute, 255, 0);
     const c = color(p.color);
+    const panVal = getOscillatedPan(p);
+    const x = map(panVal, -1, 1, 0, width);
+    const y = map(age, 0, oneMinute, height, 0);
 
-    stroke(red(c), green(c), blue(c), alpha);
-    strokeWeight(2.5);
-    line(x, 0, x, baseY);
+    drawingContext.save();
+    const grad = drawingContext.createRadialGradient(x, y, 0, x, y, 8);
+    grad.addColorStop(0, `rgba(${red(c)}, ${green(c)}, ${blue(c)}, ${alpha / 255})`);
+    grad.addColorStop(1, `rgba(0, 0, 0, 0)`);
+    drawingContext.fillStyle = grad;
+    drawingContext.beginPath();
+    drawingContext.arc(x, y, 8, 0, TWO_PI);
+    drawingContext.fill();
+    drawingContext.restore();
   }
 }
 
@@ -494,9 +626,10 @@ function drawPitchModule() {
     sawtooth: "#fc9300",
     triangle: "#00ff55",
   };
-  //bounding box
+
+  // bounding box
   fill(100, 50);
-  strokeWeight(0);
+  noStroke();
   rect(-100, -170, 245, 260, 10);
 
   let hovered = -1;
@@ -507,18 +640,18 @@ function drawPitchModule() {
     const active = enabledNotes[i];
     const flashed = millis() - noteFlashTimers[i] < 180;
 
-    // Normalize angles to 0..TWO_PI range
+    // Detect mouse hover
     const norm = (a) => (a + TWO_PI) % TWO_PI;
     const mA = norm(mouseA);
     const n1 = norm(a1);
     const n2 = norm(a2);
-
     let inArc = false;
     if (n1 < n2) inArc = mA >= n1 && mA < n2;
-    else inArc = mA >= n1 || mA < n2; // wraparound segment case
+    else inArc = mA >= n1 || mA < n2;
 
     if (mouseR >= innerR && mouseR <= outerR && inArc) hovered = i;
 
+    // Determine color
     let c = "#222";
     if (flashed) {
       c = colorMap[lastWaveType];
@@ -568,6 +701,68 @@ function drawPitchModule() {
   }
   pop();
 }
+function drawPanModule(x, y) {
+  const w = 160, h = 120;
+  const sliderW = 110;
+  const boxR = 10;
+
+  // Background box
+  fill(100, 50);
+  noStroke();
+  rect(x, y - 25, w + 10, h + 15, boxR);
+
+  drawLabelBox(x, y - 17, "Pan Control");
+
+  // --- Random Pan toggle ---
+  const randY = y + 22;
+  const randW = 56, randH = 22;
+  const randX = x + 110;
+  const randHover = mouseX > randX && mouseX < randX + randW &&
+                    mouseY > randY - randH / 2 && mouseY < randY + randH / 2;
+
+  fill(randomizedPan ? (randHover ? "#33ff99" : "#00cc66") : (randHover ? "#666" : "#333"));
+  rect(randX, randY - randH / 2, randW, randH, 6);
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text(randomizedPan ? "ON" : "OFF", randX + randW / 2, randY);
+  fill(200);
+  textAlign(LEFT, CENTER);
+  text("Random Pan:", x + 8, randY);
+
+
+  // --- Oscillate toggle ---
+  const oscY = y + 48;
+  const oscX = x + 110;
+  const oscW = 56, oscH = 22;
+  const oscHover = mouseX > oscX && mouseX < oscX + oscW &&
+                   mouseY > oscY - oscH / 2 && mouseY < oscY + oscH / 2;
+
+  fill(panOscillate ? (oscHover ? "#33ff99" : "#00cc66") : (oscHover ? "#666" : "#333"));
+  rect(oscX, oscY - oscH / 2, oscW, oscH, 6);
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text(panOscillate ? "ON" : "OFF", oscX + oscW / 2, oscY);
+  fill(200);
+  textAlign(LEFT, CENTER);
+  text("Oscillate:", x + 8, oscY);
+
+  // --- Frequency slider ---
+  const sliderX = x + 10, sliderY = y + 80;
+  fill(200);
+  text("Freq:", sliderX - 2, sliderY);
+  stroke(100);
+  strokeWeight(3);
+  line(sliderX + 40, sliderY, sliderX + 40 + sliderW, sliderY);
+
+  // Handle
+  const sliderPos = map(panOscFreq, 0.1, 10, sliderX + 40, sliderX + 40 + sliderW);
+  noStroke();
+  fill("#33ff99");
+  circle(sliderPos, sliderY, 10);
+  textAlign(CENTER, TOP);
+  fill(180);
+  text(`${panOscFreq.toFixed(2)} Hz`, sliderX + 88, sliderY + 10);
+}
 
 // Interaction
 function hovering(p) { return dist(mouseX, mouseY, p.x, p.y) < 10; }
@@ -616,10 +811,9 @@ function mousePressed() {
     return;
   }
   // --- Dynamic dampening toggle ---
-  const labelWidth = textWidth("Dynamic ENV:");
-  const dynBtnX = 190 + labelWidth + 10;
-  const dynBtnY = 10;
-  const dynBtnW = 60, dynBtnH = 32;
+  const dynBtnX = pitchModuleX + 265;
+  const dynBtnY = pitchModuleY - 75;
+  const dynBtnW = 55, dynBtnH = 22;
   if (mouseX > dynBtnX && mouseX < dynBtnX + dynBtnW &&
       mouseY > dynBtnY && mouseY < dynBtnY + dynBtnH) {
     dynamicDampening = !dynamicDampening;
@@ -627,10 +821,39 @@ function mousePressed() {
     return;
   }
 
+  // --- Pan module interactions ---
+  const pmX = pitchModuleX + 150;
+  const pmY = pitchModuleY - 20;
+
+  // Random Pan toggle
+  if (mouseX > pmX + 110 && mouseX < pmX + 110 + 56 &&
+      mouseY > pmY + 22 - 11 && mouseY < pmY + 22 + 11) {
+    randomizedPan = !randomizedPan;
+    return;
+  }
+
+  // Pan oscillate toggle
+  if (mouseX > pmX + 110 && mouseX < pmX + 110 + 56 &&
+      mouseY > pmY + 48 - 11 && mouseY < pmY + 48 + 11) {
+    panOscillate = !panOscillate;
+    return;
+  }
+
+  // Frequency slider -- click/drag start detection
+  const sliderX = pmX + 5;
+  const sliderY = pmY + 80;
+  const sliderW = 120;
+  const handleX = map(panOscFreq, 0.1, 10, sliderX + 40, sliderX + 40 + sliderW);
+  if (dist(mouseX, mouseY, handleX, sliderY) < 12) {
+    draggingPanSlider = true;
+    return;
+  }
+  
   for (const p of envPoints) if (hovering(p)) draggingPoint = p;
   masterSlider.pressed();
   envVolumeSlider.pressed();
 }
+
 function mouseDragged() {
   if (draggingPoint) {
     const i = envPoints.indexOf(draggingPoint);
@@ -647,6 +870,15 @@ function mouseDragged() {
       draggingPoint.y = envBox.y;
     }
   }
+  if (draggingPanSlider) {
+  const pmX = pitchModuleX + 150;
+  const pmY = pitchModuleY - 20;
+  const sliderX = pmX + 5;
+  const sliderW = 120;
+  const clampedX = constrain(mouseX, sliderX + 40, sliderX + 40 + sliderW);
+  const newFreq = map(clampedX, sliderX + 40, sliderX + 40 + sliderW, 0.1, 10);
+  panOscFreq = round(newFreq * 100) / 100; // keep to 0.01 resolution
+}
   masterSlider.update();
   envVolumeSlider.update();
 }
@@ -654,10 +886,13 @@ function mouseReleased() {
   draggingPoint = null;
   masterSlider.released();
   envVolumeSlider.released();
+  draggingPanSlider = false;
   if (envVolumeSlider.wasActive) {
     envTargetValue = envVolumeSlider.value;
   }
   envVolumeSlider.wasActive = envVolumeSlider.active;
+
+  
 }
 
 function styleDropdown(sel) {
@@ -687,98 +922,108 @@ function drawToggleButton(x, y) {
 }
 
 function drawDampeningButton(x, y) {
-  const label = "Dynamic ENV:";
-  textAlign(LEFT, CENTER);
-  textSize(14);
-  fill(200);
-  text(label, x, y + 20);
-
-  const btnX = x + textWidth(label) + 10;
-  const w = 60, h = 32;
-  const hover = mouseX > btnX && mouseX < btnX + w && mouseY > y && mouseY < y + h;
+  const w = 55, h = 22;
+  const hover = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
 
   strokeWeight(0);
   fill(dynamicDampening ? (hover ? "#33ff99" : "#00cc66") : (hover ? "#666" : "#333"));
-  rect(btnX, y, w, h, 8);
+  rect(x, y, w, h, 8);
 
   fill(0);
   textAlign(CENTER, CENTER);
-  text(dynamicDampening ? "ON" : "OFF", btnX + w / 2, y + h / 2);
+  text(dynamicDampening ? "ON" : "OFF", x + w / 2, y + h / 2);
+
+  drawLabelBox(x - 115, y-4, "Dampening:");
 }
+
+
 
 // Sound Logic
 function triggerPulse() {
   if (!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const millisNow = millis();
 
-  // --- Dynamic dampening logic ---
-  if (dynamicDampening) {
-    if (pulseHistory.length > 0) {
-      const lastPulse = pulseHistory[pulseHistory.length - 1];
-      const delta = millisNow - lastPulse.time;
+  const nowMs = millis();
+  const nowAudio = audioCtx.currentTime;
 
-      // Halve the env every pulse (more aggressive than before)
-      envVolumeSlider.value = max(envVolumeSlider.value * 0.5, 0.002);
-
-      // Recover to target faster (was 0.002, now 0.01)
-      if (delta > 400) {
-        envVolumeSlider.value = lerp(envVolumeSlider.value, envTargetValue, 0.2);
-      }
-    }
-  }
-
-  const activeList = Object.keys(activeWaves).filter(k => activeWaves[k]);
-  let type = activeList.length > 0 ? random(activeList) : "sine";
-  lastWaveType = type;
+  // --- Choose waveform and color ---
+  const waveType = getActiveWaveType(); // updates lastWaveType
   const colorMap = {
     sine: "#01c0ff",
     square: "#fe0606",
     sawtooth: "#fc9300",
     triangle: "#00ff55",
   };
-  lastWaveType = type;
-  const pulseColor = colorMap[type] || "#999999";
-  pulseHistory.push({ time: millisNow, color: pulseColor });
-  pulseHistory = pulseHistory.filter(p => millisNow - p.time < 60000);
+  const col = colorMap[waveType] || "#ffffff";
 
-  activeEnvelopes.push({
-    startTime: millisNow,
-    endTime: millisNow + (attack + sustainTime + decay) * 1000,
-  });
+  // --- Select random enabled note + octave ---
+  const notes = [];
+  for (let i = 0; i < enabledNotes.length; i++) if (enabledNotes[i]) notes.push(i);
+  const octs = [];
+  for (let o = 0; o < enabledOctaves.length; o++) if (enabledOctaves[o]) octs.push(o);
+  if (!notes.length || !octs.length) return;
 
-  // --- Pick random enabled pitch ---
-  const availNotes = SEMITONES.map((n, i) => (enabledNotes[i] ? i : null)).filter(v => v !== null);
-  const availOcts = enabledOctaves.map((v, i) => (v ? i : null)).filter(v => v !== null);
-  if (availNotes.length === 0 || availOcts.length === 0) return;
+  const noteIdx = random(notes);
+  const oct = random(octs);
 
-  const noteIdx = random(availNotes);
-  const oct = random(availOcts);
+  // Convert to frequency (A4 = 440)
   const midi = 12 * (oct + 1) + noteIdx;
   const freq = BASE_FREQ * Math.pow(2, (midi - 69) / 12);
 
-  // Flash the correct note/octave button
-  noteFlashTimers[noteIdx] = millis();
-  octaveFlashTimers[oct] = millis();
+  // --- Flash the corresponding note/octave button ---
+  if (noteFlashTimers[noteIdx] !== undefined) noteFlashTimers[noteIdx] = nowMs;
+  if (oct >= 0 && oct < octaveFlashTimers.length) octaveFlashTimers[oct] = nowMs;
 
-  // --- Audio ---
+  // --- Base pan (randomized if enabled) ---
+  let basePan = 0;
+  if (randomizedPan) basePan = random(pulsePanRange[0], pulsePanRange[1]);
+  const phase = random(TWO_PI);
+
+  // --- Audio nodes ---
   const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, now);
-  gain.gain.setValueAtTime(0.0001, now);
-  const envVol = envVolumeSlider ? envVolumeSlider.value : 0.5;
-  gain.gain.linearRampToValueAtTime(envVol * sustainLevel, now + attack);
-  gain.gain.setValueAtTime(envVol * sustainLevel, now + attack + sustainTime);
-  gain.gain.linearRampToValueAtTime(0.0001, now + attack + sustainTime + decay);
-  osc.connect(gain).connect(masterGain);
-  osc.start(now);
-  osc.stop(now + attack + sustainTime + decay + 0.1);
-}
+  const gainNode = audioCtx.createGain();
+  const panNode = audioCtx.createStereoPanner();
+  panNode.pan.value = basePan;
 
+  osc.type = waveType;
+  osc.frequency.setValueAtTime(freq, nowAudio);
+
+  const envVol = envVolumeSlider ? envVolumeSlider.value : 0.03;
+  gainNode.gain.setValueAtTime(0.0001, nowAudio);
+  gainNode.gain.linearRampToValueAtTime(envVol * sustainLevel, nowAudio + attack);
+  gainNode.gain.setValueAtTime(envVol * sustainLevel, nowAudio + attack + sustainTime);
+  gainNode.gain.linearRampToValueAtTime(0.0001, nowAudio + attack + sustainTime + decay);
+
+  osc.connect(gainNode);
+  gainNode.connect(panNode);
+  panNode.connect(masterGain);
+
+  osc.start(nowAudio);
+  osc.stop(nowAudio + attack + sustainTime + decay + 0.05);
+
+  // --- Record pulse for visuals ---
+  pulseHistory.push({
+    time: nowMs,
+    color: col,
+    basePan: basePan,
+    phaseOffset: phase,
+    panNode: panNode,
+  });
+  const oneMinuteAgo = nowMs - 60000;
+  pulseHistory = pulseHistory.filter(p => p.time > oneMinuteAgo);
+
+  // --- Envelope visual tracking ---
+  activeEnvelopes.push({
+    startTime: nowMs,
+    endTime: nowMs + (attack + sustainTime + decay) * 1000,
+  });
+  // apply dynamic visual dampening
+  if (dynamicDampening && envVolumeSlider) {
+    envVolumeSlider.value = max(envVolumeSlider.min, envVolumeSlider.value * 0.5);
+  }
+}
 // Resize & Color
 function windowResized() {
-  const minW = 500;  // prevent overlap on width
+  const minW = 595;  // prevent overlap on width
   const minH = 605;  // prevent overlap on height
   resizeCanvas(max(windowWidth, minW), max(windowHeight, minH));
   

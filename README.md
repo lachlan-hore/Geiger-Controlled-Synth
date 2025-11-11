@@ -47,7 +47,43 @@ npm install
 
 ## Changelog:
 
-### This version(v0.1.61)
+### This version (v0.2.0)
+
+#### New Features
+- **Stereo Panning System**
+  - Added randomized per-pulse panning.
+  - Optional oscillating pan motion with frequency control (0.1–10 Hz).
+- **Pan Control Module**
+  - New UI section with toggles for Random Pan and Oscillation.
+  - Interactive frequency slider with live updates.
+- **Dynamic Logo**
+  - Introduced glowing “Geiger Pulse Synth” logo reacting to the envelope.
+  - Uses blended color from all active waveforms.
+  - Supports *Orbitron*-style futuristic font.
+
+#### Visual & UI Enhancements
+- Waveform ring and halo now blend colors from all enabled waveforms.
+- Pulse timeline reworked — pulses move diagonally with pan position.
+- Dynamic dampening visually linked to envelope control.
+- Improved layout alignment for pitch, pan, and envelope modules.
+- Cleaner gradients, smoother glow transitions, and better performance on larger screens.
+
+#### Code Improvements
+- Refactored `triggerPulse()` for unified pan and envelope handling.
+- Added helper functions:
+  - `getActiveWaveType()`
+  - `getRandomNoteFrequency()`
+  - `getOscillatedPan()`
+- Removed legacy random waveform mode and unused variables.
+- Optimized visuals and CPU load by trimming old pulses per minute.
+
+#### Bug Fixes
+- Fixed inconsistent note and octave flash timing.
+- Fixed waveform color desync between active buttons and visuals.
+- Resolved clipping in rapid pulse sequences.
+
+
+### (v0.1.61):
 #### **Functionality & Behavior Updates**
 - Fixed **Dynamic ENV toggle** not responding correctly due to mismatched click area — now properly toggles when pressed.
 - Prevented **ENV target** from resetting unintentionally when clicking anywhere on the canvas; only updates when the slider is actively moved.
@@ -68,7 +104,7 @@ npm install
 - Fixed Dynamic Dampening button’s bounding box alignment with visual layout.
 - Eliminated residual variable reference errors during slider release handling.
 
-### (v0.1.6) :
+### (v0.1.6):
 #### **Refinements & Structural Improvements**
 - Internal codebase reorganized for cleaner rendering and consistent UI scaling.
 - Further smoothed halo and waveform gradients for high-refresh displays.
