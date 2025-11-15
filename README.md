@@ -1,4 +1,4 @@
-# Geiger-Controlled-Synth
+# Geiger-Pulse-Synth
 
 Turn Geiger counter pulses (via audio input) into sound synthesis and interactive visualizations.
 
